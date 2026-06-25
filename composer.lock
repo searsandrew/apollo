@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "3f5aeb58e0443b24b7ad0a01880429b4",
+    "content-hash": "f8b5f75649186706bc4ceb7944cc9b1b",
     "packages": [
         {
             "name": "bacon/bacon-qr-code",
@@ -3386,6 +3386,67 @@
                 "source": "https://github.com/phpstan/phpdoc-parser/tree/2.3.2"
             },
             "time": "2026-01-25T14:56:51+00:00"
+        },
+        {
+            "name": "plank/laravel-metable",
+            "version": "6.3.1",
+            "source": {
+                "type": "git",
+                "url": "https://github.com/plank/laravel-metable.git",
+                "reference": "30919b17bb553c0530e589769549cd70441c028a"
+            },
+            "dist": {
+                "type": "zip",
+                "url": "https://api.github.com/repos/plank/laravel-metable/zipball/30919b17bb553c0530e589769549cd70441c028a",
+                "reference": "30919b17bb553c0530e589769549cd70441c028a",
+                "shasum": ""
+            },
+            "require": {
+                "ext-json": "*",
+                "illuminate/database": "^12.0|^13.0",
+                "illuminate/support": "^12.0|^13.0",
+                "php": ">=8.3",
+                "phpoption/phpoption": "^1.9.3"
+            },
+            "require-dev": {
+                "guzzlehttp/guzzle": "^7.9",
+                "guzzlehttp/promises": "^1.5|^2.0",
+                "laravel/legacy-factories": "^1.4.0",
+                "mockery/mockery": "^1.6.12",
+                "nesbot/carbon": "^2.72.0|^3.8.4",
+                "orchestra/testbench": "^10.0|^11.0",
+                "php-coveralls/php-coveralls": "^2.7.0",
+                "phpunit/phpunit": "^12"
+            },
+            "type": "library",
+            "extra": {
+                "laravel": {
+                    "providers": [
+                        "Plank\\Metable\\MetableServiceProvider"
+                    ]
+                }
+            },
+            "autoload": {
+                "psr-4": {
+                    "Plank\\Metable\\": "src/"
+                }
+            },
+            "notification-url": "https://packagist.org/downloads/",
+            "license": [
+                "MIT"
+            ],
+            "authors": [
+                {
+                    "name": "Sean Fraser",
+                    "email": "sean@plankdesign.com"
+                }
+            ],
+            "description": "A package for attaching arbitrary data to Eloquent models",
+            "support": {
+                "issues": "https://github.com/plank/laravel-metable/issues",
+                "source": "https://github.com/plank/laravel-metable/tree/6.3.1"
+            },
+            "time": "2026-04-17T09:54:09+00:00"
         },
         {
             "name": "pragmarx/google2fa",

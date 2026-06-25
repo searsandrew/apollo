@@ -38,7 +38,9 @@
                     />
                 </flux:tooltip>
             </flux:navbar>
-
+            @can('view masquerade')
+                @livewire('masquerade')
+            @endcan
             <x-desktop-user-menu />
         </flux:header>
 
