@@ -16,5 +16,10 @@ class DatabaseSeeder extends Seeder
     public function run(): void
     {
         $this->call(RolesAndPermissionsSeeder::class);
+
+        if (app()->environment('local')) {
+            $user = User::first();
+            $user->setMeta('netsuite_managed_ids', [736, 746, 959, 1439]);
+        }
     }
 }
