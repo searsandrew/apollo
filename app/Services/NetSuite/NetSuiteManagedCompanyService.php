@@ -7,9 +7,9 @@ use Illuminate\Contracts\Cache\Repository as CacheRepository;
 use Searsandrew\BriarRose\BriarRoseManager;
 use Throwable;
 
-class NetSuiteManagedCustomerService
+class NetSuiteManagedCompanyService
 {
-    private const int CLOSED_WON_CUSTOMER_STATUS_ID = 13;
+    private const int CLOSED_WON_COMPANY_STATUS_ID = 13;
 
     private const int CACHE_SECONDS = 900;
 
@@ -31,7 +31,7 @@ class NetSuiteManagedCustomerService
             return [];
         }
 
-        return $this->rememberCustomers(
+        return $this->rememberCompanies(
             user: $user,
             salesRepIds: $salesRepIds,
             search: null,
@@ -50,13 +50,13 @@ class NetSuiteManagedCustomerService
             return [];
         }
 
-        $search = $this->normalizedCustomerSearch($search);
+        $search = $this->normalizedCompanySearch($search);
 
         if ($search === '') {
             return [];
         }
 
-        return $this->rememberCustomers(
+        return $this->rememberCompanies(
             user: $user,
             salesRepIds: $salesRepIds,
             search: $search,
@@ -68,13 +68,13 @@ class NetSuiteManagedCustomerService
      * @param  array<int, int>  $salesRepIds
      * @return array<int, array{id: int, account_number: string|null, name: string, email: string|null}>
      */
-    private function rememberCustomers(User $user, array $salesRepIds, ?string $search, ?int $limit): array
+    private function rememberCompanies(User $user, array $salesRepIds, ?string $search, ?int $limit): array
     {
         try {
             return $this->cache->remember(
-                $this->customerCacheKey($user, $salesRepIds, $search, $limit),
+                $this->companyCacheKey($user, $salesRepIds, $search, $limit),
                 self::CACHE_SECONDS,
-                fn (): array => $this->fetchCustomersFromNetSuite($salesRepIds, $search, $limit),
+                fn (): array => $this->fetchCompaniesFromNetSuite($salesRepIds, $search, $limit),
             );
         } catch (Throwable $exception) {
             report($exception);
@@ -87,31 +87,31 @@ class NetSuiteManagedCustomerService
      * @param  array<int, int>  $salesRepIds
      * @return array<int, array{id: int, account_number: string|null, name: string, email: string|null}>
      */
-    private function fetchCustomersFromNetSuite(array $salesRepIds, ?string $search, ?int $limit): array
+    private function fetchCompaniesFromNetSuite(array $salesRepIds, ?string $search, ?int $limit): array
     {
-        $customers = [];
+        $companies = [];
         $offset = 0;
         $pageLimit = $limit ?? self::PAGE_LIMIT;
 
         do {
             $page = $this->briarRose->rest()->suiteql()->query(
-                $this->customerSuiteQl($salesRepIds, $search),
+                $this->companySuiteQl($salesRepIds, $search),
                 ['limit' => $pageLimit, 'offset' => $offset],
             )->throw()->json();
 
-            foreach ($page['items'] ?? [] as $customer) {
-                $customers[] = [
-                    'id' => (int) $customer['id'],
-                    'account_number' => blank($customer['account_number'] ?? null) ? null : (string) $customer['account_number'],
-                    'name' => $customer['companyname'] ?: $customer['entityid'] ?: 'Customer '.$customer['id'],
-                    'email' => $customer['email'] ?? null,
+            foreach ($page['items'] ?? [] as $company) {
+                $companies[] = [
+                    'id' => (int) $company['id'],
+                    'account_number' => blank($company['account_number'] ?? null) ? null : (string) $company['account_number'],
+                    'name' => $company['companyname'] ?: $company['entityid'] ?: 'Company '.$company['id'],
+                    'email' => $company['email'] ?? null,
                 ];
             }
 
             $offset += $pageLimit;
         } while ($limit === null && ($page['hasMore'] ?? false) === true);
 
-        return $customers;
+        return $companies;
     }
 
     /**
@@ -134,11 +134,11 @@ class NetSuiteManagedCustomerService
     /**
      * @param  array<int, int>  $salesRepIds
      */
-    private function customerSuiteQl(array $salesRepIds, ?string $search): string
+    private function companySuiteQl(array $salesRepIds, ?string $search): string
     {
         $salesRepIdsSql = implode(', ', $salesRepIds);
-        $closedWonCustomerStatusId = self::CLOSED_WON_CUSTOMER_STATUS_ID;
-        $searchSql = $this->customerSearchSql($search);
+        $closedWonCompanyStatusId = self::CLOSED_WON_COMPANY_STATUS_ID;
+        $searchSql = $this->companySearchSql($search);
 
         return <<<SQL
             SELECT
@@ -149,19 +149,19 @@ class NetSuiteManagedCustomerService
                 email
             FROM customer
             WHERE isinactive = 'F'
-                AND entitystatus = {$closedWonCustomerStatusId}
+                AND entitystatus = {$closedWonCompanyStatusId}
                 AND salesrep IN ({$salesRepIdsSql})
                 {$searchSql}
             ORDER BY companyname ASC, entityid ASC
         SQL;
     }
 
-    private function normalizedCustomerSearch(string $search): string
+    private function normalizedCompanySearch(string $search): string
     {
         return trim((string) preg_replace('/\s+/', ' ', $search));
     }
 
-    private function customerSearchSql(?string $search): string
+    private function companySearchSql(?string $search): string
     {
         if ($search === null || $search === '') {
             return '';
@@ -186,9 +186,9 @@ class NetSuiteManagedCustomerService
     /**
      * @param  array<int, int>  $salesRepIds
      */
-    private function customerCacheKey(User $user, array $salesRepIds, ?string $search, ?int $limit): string
+    private function companyCacheKey(User $user, array $salesRepIds, ?string $search, ?int $limit): string
     {
-        return 'netsuite-managed-customers:'.($user->getKey() ?? 'guest').':'.md5((string) json_encode([
+        return 'netsuite-managed-companies:'.($user->getKey() ?? 'guest').':'.md5((string) json_encode([
             'sales_rep_ids' => $salesRepIds,
             'search' => $search,
             'limit' => $limit,

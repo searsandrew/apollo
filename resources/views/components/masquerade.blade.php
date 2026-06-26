@@ -1,30 +1,30 @@
 <?php
 
-use App\Services\NetSuite\NetSuiteManagedCustomerService;
+use App\Services\NetSuite\NetSuiteManagedCompanyService;
 use Illuminate\Support\Facades\Auth;
 use Livewire\Component;
 use Livewire\Features\SupportRedirects\Redirector;
 
 new class extends Component
 {
-    private const int SEARCH_CUSTOMER_LIMIT = 15;
+    private const int SEARCH_COMPANY_LIMIT = 15;
 
-    private NetSuiteManagedCustomerService $managedCustomerService;
+    private NetSuiteManagedCompanyService $managedCompanyService;
 
     /**
      * @var array<int, array{id: int, account_number: string|null, name: string, email: string|null}>
      */
-    public array $customers = [];
+    public array $companies = [];
 
     public ?int $netSuiteId = null;
 
-    public bool $hasSearchedCustomers = false;
+    public bool $hasSearchedCompanies = false;
 
-    public string $customerSearch = '';
+    public string $companySearch = '';
 
-    public function boot(NetSuiteManagedCustomerService $managedCustomerService): void
+    public function boot(NetSuiteManagedCompanyService $managedCompanyService): void
     {
-        $this->managedCustomerService = $managedCustomerService;
+        $this->managedCompanyService = $managedCompanyService;
     }
 
     public function mount(): void
@@ -38,20 +38,20 @@ new class extends Component
         $this->netSuiteId = $user->netsuite_user_id === null ? null : (int) $user->netsuite_user_id;
     }
 
-    public function selectCustomer(int $netSuiteId): Redirector
+    public function selectCompany(int $netSuiteId): Redirector
     {
         $user = Auth::user();
 
         if ($user !== null) {
             $this->netSuiteId = $netSuiteId;
-            $user->setMeta('customer_id', $netSuiteId);
+            $user->setMeta('company_id', $netSuiteId);
             $user->save();
         }
 
         return redirect()->route('dashboard');
     }
 
-    public function searchCustomers(string $search): void
+    public function searchCompanies(string $search): void
     {
         $user = Auth::user();
 
@@ -59,23 +59,23 @@ new class extends Component
             return;
         }
 
-        $this->customerSearch = $this->normalizedCustomerSearch($search);
-        $this->hasSearchedCustomers = mb_strlen($this->customerSearch) >= 2;
+        $this->companySearch = $this->normalizedCompanySearch($search);
+        $this->hasSearchedCompanies = mb_strlen($this->companySearch) >= 2;
 
-        if (! $this->hasSearchedCustomers) {
-            $this->customers = [];
+        if (! $this->hasSearchedCompanies) {
+            $this->companies = [];
 
             return;
         }
 
-        $this->customers = $this->managedCustomerService->searchForUser(
+        $this->companies = $this->managedCompanyService->searchForUser(
             $user,
-            $this->customerSearch,
-            self::SEARCH_CUSTOMER_LIMIT,
+            $this->companySearch,
+            self::SEARCH_COMPANY_LIMIT,
         );
     }
 
-    private function normalizedCustomerSearch(string $search): string
+    private function normalizedCompanySearch(string $search): string
     {
         return trim((string) preg_replace('/\s+/', ' ', $search));
     }
@@ -91,7 +91,7 @@ new class extends Component
             search: '',
             activeIndex: -1,
             focusSearch() {
-                this.$nextTick(() => setTimeout(() => this.$refs.customerSearch?.focus(), 50))
+                this.$nextTick(() => setTimeout(() => this.$refs.companySearch?.focus(), 50))
             },
             toggleOpen() {
                 this.open = ! this.open
@@ -100,15 +100,15 @@ new class extends Component
                     this.focusSearch()
                 }
             },
-            searchCustomers() {
+            searchCompanies() {
                 this.activeIndex = -1
-                this.$wire.searchCustomers(this.search)
+                this.$wire.searchCompanies(this.search)
             },
-            customerItems() {
-                return Array.from(this.$root.querySelectorAll('[data-masquerade-customer]'))
+            companyItems() {
+                return Array.from(this.$root.querySelectorAll('[data-masquerade-company]'))
             },
             moveActive(direction) {
-                const items = this.customerItems()
+                const items = this.companyItems()
 
                 if (items.length === 0) {
                     this.activeIndex = -1
@@ -125,7 +125,7 @@ new class extends Component
                 this.$nextTick(() => items[this.activeIndex]?.scrollIntoView({ block: 'nearest' }))
             },
             selectActive() {
-                this.customerItems()[this.activeIndex]?.click()
+                this.companyItems()[this.activeIndex]?.click()
             },
         }"
         x-on:click.outside="open = false"
@@ -163,13 +163,13 @@ new class extends Component
         >
             <div class="p-1.5" wire:ignore>
                 <flux:input
-                    x-ref="customerSearch"
+                    x-ref="companySearch"
                     x-model="search"
-                    x-on:input.debounce.350ms="searchCustomers()"
+                    x-on:input.debounce.350ms="searchCompanies()"
                     icon="magnifying-glass"
                     clearable
-                    loading="searchCustomers"
-                    :placeholder="__('Search customers')"
+                    loading="searchCompanies"
+                    :placeholder="__('Search companies')"
                 />
             </div>
 
@@ -179,27 +179,27 @@ new class extends Component
             >
                 <div
                     wire:loading.flex
-                    wire:target="searchCustomers"
+                    wire:target="searchCompanies"
                     class="items-center gap-2 px-2 py-2 text-sm font-medium text-zinc-500 dark:text-zinc-300"
                 >
                     <flux:icon.loading variant="mini" class="text-zinc-400"/>
                     {{ __('Searching...') }}
                 </div>
 
-                <div wire:loading.remove wire:target="searchCustomers" class="pt-1">
-                    @if ($hasSearchedCustomers && $customers === [])
-                        <flux:menu.item disabled>{{ __('No customers found') }}</flux:menu.item>
+                <div wire:loading.remove wire:target="searchCompanies" class="pt-1">
+                    @if ($hasSearchedCompanies && $companies === [])
+                        <flux:menu.item disabled>{{ __('No companies found') }}</flux:menu.item>
                     @endif
 
-                    @foreach ($customers as $customer)
+                    @foreach ($companies as $company)
                         <flux:menu.item
                             class="relative w-full transition-colors"
-                            data-masquerade-customer
+                            data-masquerade-company
                             x-bind:data-active="activeIndex === {{ $loop->index }} ? '' : null"
                             x-bind:class="activeIndex === {{ $loop->index }} ? 'bg-sky-50 text-sky-950 dark:bg-sky-400/20 dark:text-sky-50' : ''"
                             x-on:mouseenter="activeIndex = {{ $loop->index }}"
-                            wire:key="masquerade-customer-{{ $customer['id'] }}"
-                            wire:click="selectCustomer({{ $customer['id'] }})"
+                            wire:key="masquerade-company-{{ $company['id'] }}"
+                            wire:click="selectCompany({{ $company['id'] }})"
                         >
                             <span
                                 aria-hidden="true"
@@ -208,13 +208,13 @@ new class extends Component
                             ></span>
 
                             <div class="flex w-full min-w-0 items-center gap-2 ps-2">
-                                @if ($customer['account_number'] !== null)
+                                @if ($company['account_number'] !== null)
                                     <flux:badge class="max-w-24 shrink-0 truncate" size="sm" rounded>
-                                        {{ $customer['account_number'] }}
+                                        {{ $company['account_number'] }}
                                     </flux:badge>
                                 @endif
 
-                                <span class="min-w-0 flex-1 truncate">{{ $customer['name'] }}</span>
+                                <span class="min-w-0 flex-1 truncate">{{ $company['name'] }}</span>
                             </div>
                         </flux:menu.item>
                     @endforeach

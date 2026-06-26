@@ -1,7 +1,7 @@
 <?php
 
 use App\Models\User;
-use App\Services\NetSuite\NetSuiteManagedCustomerService;
+use App\Services\NetSuite\NetSuiteManagedCompanyService;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
@@ -25,7 +25,7 @@ beforeEach(function (): void {
     Http::preventStrayRequests();
 });
 
-it('searches managed customers by company, entity id, and account number', function (): void {
+it('searches managed companies by company, entity id, and account number', function (): void {
     $user = User::factory()->create();
     $user->setMeta('netsuite_managed_ids', [1439, '0', 1427, 1439]);
 
@@ -42,9 +42,9 @@ it('searches managed customers by company, entity id, and account number', funct
         'hasMore' => false,
     ]));
 
-    $customers = app(NetSuiteManagedCustomerService::class)->searchForUser($user, '  A-0121  ', 15);
+    $companies = app(NetSuiteManagedCompanyService::class)->searchForUser($user, '  A-0121  ', 15);
 
-    expect($customers)->toBe([
+    expect($companies)->toBe([
         [
             'id' => 286,
             'account_number' => 'A-0121',
@@ -68,7 +68,7 @@ it('searches managed customers by company, entity id, and account number', funct
     });
 });
 
-it('paginates the default managed customer list', function (): void {
+it('paginates the default managed company list', function (): void {
     $user = User::factory()->create();
     $user->setMeta('netsuite_managed_ids', [1439]);
 
@@ -100,18 +100,18 @@ it('paginates the default managed customer list', function (): void {
             ]),
     ]);
 
-    $customers = app(NetSuiteManagedCustomerService::class)->allForUser($user);
+    $companies = app(NetSuiteManagedCompanyService::class)->allForUser($user);
 
-    expect($customers)->toHaveCount(2)
-        ->and($customers[0]['name'])->toBe('Acme Industrial')
-        ->and($customers[1]['name'])->toBe('Beta Supply');
+    expect($companies)->toHaveCount(2)
+        ->and($companies[0]['name'])->toBe('Acme Industrial')
+        ->and($companies[1]['name'])->toBe('Beta Supply');
 
     Http::assertSentCount(2);
     Http::assertSent(fn (Request $request): bool => str_contains($request->url(), 'limit=1000')
         && str_contains($request->url(), 'offset=1000'));
 });
 
-it('caches customer searches for the same user and managed sales reps', function (): void {
+it('caches company searches for the same user and managed sales reps', function (): void {
     $user = User::factory()->create();
     $user->setMeta('netsuite_managed_ids', [1439]);
 
@@ -128,7 +128,7 @@ it('caches customer searches for the same user and managed sales reps', function
         'hasMore' => false,
     ]));
 
-    $service = app(NetSuiteManagedCustomerService::class);
+    $service = app(NetSuiteManagedCompanyService::class);
 
     expect($service->searchForUser($user, 'Acme'))->toHaveCount(1)
         ->and($service->searchForUser($user, 'Acme'))->toHaveCount(1);
@@ -136,10 +136,10 @@ it('caches customer searches for the same user and managed sales reps', function
     Http::assertSentCount(1);
 });
 
-it('delegates searchable customer lookups from the masquerade component', function (): void {
+it('delegates searchable company lookups from the masquerade component', function (): void {
     $user = User::factory()->create();
 
-    $this->mock(NetSuiteManagedCustomerService::class, function (MockInterface $mock) use ($user): void {
+    $this->mock(NetSuiteManagedCompanyService::class, function (MockInterface $mock) use ($user): void {
         $mock->shouldReceive('searchForUser')
             ->once()
             ->withArgs(fn (User $managedUser, string $search, int $limit): bool => $managedUser->is($user)
@@ -158,10 +158,22 @@ it('delegates searchable customer lookups from the masquerade component', functi
     $this->actingAs($user);
 
     Livewire::test('masquerade')
-        ->call('searchCustomers', ' A ')
-        ->assertSet('hasSearchedCustomers', false)
-        ->assertSet('customers', [])
-        ->call('searchCustomers', ' ACME ')
-        ->assertSet('hasSearchedCustomers', true)
-        ->assertSet('customers.0.name', 'Acme Industrial');
+        ->call('searchCompanies', ' A ')
+        ->assertSet('hasSearchedCompanies', false)
+        ->assertSet('companies', [])
+        ->call('searchCompanies', ' ACME ')
+        ->assertSet('hasSearchedCompanies', true)
+        ->assertSet('companies.0.name', 'Acme Industrial');
+});
+
+it('stores the selected masquerade company on the user meta', function (): void {
+    $user = User::factory()->create();
+
+    $this->actingAs($user);
+
+    Livewire::test('masquerade')
+        ->call('selectCompany', 286)
+        ->assertRedirect(route('dashboard'));
+
+    expect($user->refresh()->getMeta('company_id'))->toBe(286);
 });
