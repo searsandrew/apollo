@@ -23,6 +23,30 @@
     --color-zinc-900: #171717;
     --color-zinc-950: #0a0a0a;
 
+    --color-choice-blue-50: #EDF3F7;
+    --color-choice-blue-100: #CEDDE9;
+    --color-choice-blue-200: #AEC7DB;
+    --color-choice-blue-300: #8EB2CC;
+    --color-choice-blue-400: #6F9CBE;
+    --color-choice-blue-500: #4F86B0;
+    --color-choice-blue-600: #406D8F; /* Brand Blue */
+    --color-choice-blue-700: #335671;
+    --color-choice-blue-800: #243E51;
+    --color-choice-blue-900: #162631;
+    --color-choice-blue-950: #080D12;
+
+    --color-choice-orange-50: #FDECE7;
+    --color-choice-orange-100: #FACABC;
+    --color-choice-orange-200: #F7A791;
+    --color-choice-orange-300: #F48566;
+    --color-choice-orange-400: #F26B45; /* Brand Orange */
+    --color-choice-orange-500: #EE4111;
+    --color-choice-orange-600: #C4350E;
+    --color-choice-orange-700: #99290B;
+    --color-choice-orange-800: #6E1E08;
+    --color-choice-orange-900: #431205;
+    --color-choice-orange-950: #180602;
+
     --color-accent: var(--color-neutral-800);
     --color-accent-content: var(--color-neutral-800);
     --color-accent-foreground: var(--color-white);
@@ -52,7 +76,7 @@
 }
 
 [data-flux-label] {
-    @apply  !mb-0 !leading-tight;
+    @apply  mb-0! leading-tight!;
 }
 
 input:focus[data-flux-control],
