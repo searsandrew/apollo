@@ -1,18 +1,15 @@
 <?php
 
+use App\Services\NetSuite\NetSuiteManagedCustomerService;
 use Illuminate\Support\Facades\Auth;
-use Illuminate\Support\Facades\Cache;
 use Livewire\Component;
 use Livewire\Features\SupportRedirects\Redirector;
-use Searsandrew\BriarRose\Facades\BriarRose;
 
 new class extends Component
 {
-    private const int CLOSED_WON_CUSTOMER_STATUS_ID = 13;
-
     private const int SEARCH_CUSTOMER_LIMIT = 15;
 
-    private const int CUSTOMER_CACHE_SECONDS = 900;
+    private NetSuiteManagedCustomerService $managedCustomerService;
 
     /**
      * @var array<int, array{id: int, account_number: string|null, name: string, email: string|null}>
@@ -24,6 +21,11 @@ new class extends Component
     public bool $hasSearchedCustomers = false;
 
     public string $customerSearch = '';
+
+    public function boot(NetSuiteManagedCustomerService $managedCustomerService): void
+    {
+        $this->managedCustomerService = $managedCustomerService;
+    }
 
     public function mount(): void
     {
@@ -66,131 +68,16 @@ new class extends Component
             return;
         }
 
-        $this->customers = $this->customersForManagedSalesReps(
-            $user->getMeta('netsuite_managed_ids'),
+        $this->customers = $this->managedCustomerService->searchForUser(
+            $user,
             $this->customerSearch,
+            self::SEARCH_CUSTOMER_LIMIT,
         );
-    }
-
-    /**
-     * @return array<int, array{id: int, account_number: string|null, name: string, email: string|null}>
-     */
-    private function customersForManagedSalesReps(mixed $managedSalesRepIds, string $search): array
-    {
-        $salesRepIds = $this->normalizedManagedSalesRepIds($managedSalesRepIds);
-
-        if ($salesRepIds === []) {
-            return [];
-        }
-
-        $search = $this->normalizedCustomerSearch($search);
-
-        try {
-            return Cache::remember(
-                $this->customerCacheKey($salesRepIds, $search),
-                self::CUSTOMER_CACHE_SECONDS,
-                fn (): array => $this->fetchCustomersFromNetSuite($salesRepIds, $search),
-            );
-        } catch (Throwable $exception) {
-            report($exception);
-
-            return [];
-        }
-    }
-
-    /**
-     * @param  array<int, int>  $salesRepIds
-     * @return array<int, array{id: int, account_number: string|null, name: string, email: string|null}>
-     */
-    private function fetchCustomersFromNetSuite(array $salesRepIds, string $search): array
-    {
-        $salesRepIdsSql = implode(', ', $salesRepIds);
-        $closedWonCustomerStatusId = self::CLOSED_WON_CUSTOMER_STATUS_ID;
-        $searchSql = $this->customerSearchSql($search);
-        $sql = <<<SQL
-            SELECT
-                id,
-                entityid,
-                custentity3 AS account_number,
-                companyname,
-                email
-            FROM customer
-            WHERE isinactive = 'F'
-                AND entitystatus = {$closedWonCustomerStatusId}
-                AND salesrep IN ({$salesRepIdsSql})
-                {$searchSql}
-            ORDER BY companyname ASC, entityid ASC
-        SQL;
-
-        $page = BriarRose::rest()->suiteql()->query($sql, [
-            'limit' => self::SEARCH_CUSTOMER_LIMIT,
-            'offset' => 0,
-        ])->throw()->json();
-
-        $customers = [];
-
-        foreach ($page['items'] ?? [] as $customer) {
-            $customers[] = [
-                'id' => (int) $customer['id'],
-                'account_number' => blank($customer['account_number'] ?? null) ? null : (string) $customer['account_number'],
-                'name' => $customer['companyname'] ?: $customer['entityid'] ?: 'Customer '.$customer['id'],
-                'email' => $customer['email'] ?? null,
-            ];
-        }
-
-        return $customers;
-    }
-
-    /**
-     * @return array<int, int>
-     */
-    private function normalizedManagedSalesRepIds(mixed $managedSalesRepIds): array
-    {
-        if (! is_array($managedSalesRepIds)) {
-            return [];
-        }
-
-        return collect($managedSalesRepIds)
-            ->map(fn (mixed $salesRepId): int => (int) $salesRepId)
-            ->filter(fn (int $salesRepId): bool => $salesRepId > 0)
-            ->unique()
-            ->values()
-            ->all();
-    }
-
-    /**
-     * @param  array<int, int>  $salesRepIds
-     */
-    private function customerCacheKey(array $salesRepIds, string $search): string
-    {
-        return 'masquerade-customers:'.(Auth::id() ?? 'guest').':'.md5(implode(',', $salesRepIds).'|'.$search);
     }
 
     private function normalizedCustomerSearch(string $search): string
     {
         return trim((string) preg_replace('/\s+/', ' ', $search));
-    }
-
-    private function customerSearchSql(string $search): string
-    {
-        if ($search === '') {
-            return '';
-        }
-
-        $searchTerm = $this->suiteQlStringLiteral('%'.$search.'%');
-
-        return <<<SQL
-            AND (
-                UPPER(companyname) LIKE UPPER({$searchTerm})
-                OR UPPER(entityid) LIKE UPPER({$searchTerm})
-                OR UPPER(custentity3) LIKE UPPER({$searchTerm})
-            )
-        SQL;
-    }
-
-    private function suiteQlStringLiteral(string $value): string
-    {
-        return "'".str_replace("'", "''", $value)."'";
     }
 };
 ?>
