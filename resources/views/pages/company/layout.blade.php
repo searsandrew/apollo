@@ -6,23 +6,7 @@
 ])
 
 <div class="w-full">
-    <div class="relative mb-6 w-full">
-        @if ($loadingCompanyHeader)
-            <flux:heading size="xl" level="1">
-                <flux:skeleton.line animate="shimmer" class="h-10 w-full sm:w-1/3" />
-            </flux:heading>
-
-            <flux:subheading size="lg" class="mb-6">
-                <flux:skeleton.line animate="shimmer" class="w-1/2 sm:w-1/5" />
-            </flux:subheading>
-        @else
-            <flux:heading size="xl" level="1">{{ $companyName }}</flux:heading>
-            <flux:subheading size="lg" class="mb-6">{{ $accountNumber }}</flux:subheading>
-        @endif
-
-        <flux:separator variant="subtle" />
-    </div>
-
+    <x-company-name :company="$company" />
     <div class="flex items-start max-md:flex-col">
         <div class="me-10 w-full pb-4 md:w-55">
             <flux:navlist aria-label="{{ __('Company') }}">

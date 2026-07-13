@@ -58,7 +58,7 @@ new class extends Component {
 };
 ?>
 
-<section class="w-full" @if (! $this->companyHeaderReady) wire:poll.visible.1500ms @endif>
+<section class="w-full">
     <x-pages::company.layout
         :company="$netsuiteCompanyId"
         :company-name="$this->summary?->company_name"
