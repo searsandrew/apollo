@@ -44,7 +44,7 @@ new class extends Component {
 
 <div class="relative mb-6 w-full">
     @if (! $this->companyHeaderReady)
-        <div wire:poll.visible.1500ms>
+        <div wire:poll.visible.2s>
             <flux:heading size="xl" level="1">
                 <flux:skeleton.line animate="shimmer" class="h-10 w-full sm:w-1/3"/>
             </flux:heading>

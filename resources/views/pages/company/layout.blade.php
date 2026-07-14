@@ -1,6 +1,5 @@
 @props([
-    'company',
-    'current' => null,
+    'company'
 ])
 
 <div class="w-full">
@@ -8,7 +7,7 @@
     <div class="flex items-start max-md:flex-col">
         <div class="me-10 w-full pb-4 md:w-55">
             <flux:navlist aria-label="{{ __('Company') }}">
-                <flux:navlist.item :href="route('company.show', $company)" :current="$current === 'profile'" wire:navigate>{{ __('Profile') }}</flux:navlist.item>
+                <flux:navlist.item :href="route('company.show', $company)" wire:navigate>{{ __('Profile') }}</flux:navlist.item>
                 <flux:navlist.item :href="route('security.edit')" wire:navigate>{{ __('Purchases') }}</flux:navlist.item>
                 <flux:navlist.item :href="route('appearance.edit')" wire:navigate>{{ __('Invoices') }}</flux:navlist.item>
                 <flux:navlist.group :heading="__('Marketing')" expandable :expanded="false">
