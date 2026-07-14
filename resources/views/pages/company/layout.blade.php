@@ -12,7 +12,8 @@
         <div class="me-10 w-full pb-4 md:w-55">
             <flux:navlist aria-label="{{ __('Company') }}">
                 <flux:navlist.item icon="building-storefront" :href="route('company.show', $company)" wire:navigate>{{ __('Profile') }}</flux:navlist.item>
-                <flux:navlist.item icon="gift" :href="route('company.orders', $company)" wire:navigate>{{ __('Purchases') }}</flux:navlist.item>
+                <flux:navlist.item icon="clipboard-document-list" :href="route('company.purchase-orders', $company)" wire:navigate>{{ __('Purchase Orders') }}</flux:navlist.item>
+                <flux:navlist.item icon="clipboard-document-check" :href="route('company.sales-orders', $company)" wire:navigate>{{ __('Sales Orders') }}</flux:navlist.item>
                 <flux:navlist.item :icon="($summary?->terms == 'Credit Card at Time of Purchase' ? 'credit-card' : 'banknotes')" :href="route('appearance.edit')" wire:navigate>{{ __('Invoices') }}</flux:navlist.item>
                 <flux:navlist.group :heading="__('Marketing')" expandable :expanded="false">
                     <flux:navlist.item href="#">{{ __('Landing Page') }}</flux:navlist.item>
