@@ -1,15 +1,19 @@
 @props([
-    'company'
+    'company' => request()->route('company'),
 ])
+
+@php
+    $summary = \App\Models\CompanySummary::where('netsuite_company_id', $company)->first();
+@endphp
 
 <div class="w-full">
     <livewire:components::company-name :company="$company" />
     <div class="flex items-start max-md:flex-col">
         <div class="me-10 w-full pb-4 md:w-55">
             <flux:navlist aria-label="{{ __('Company') }}">
-                <flux:navlist.item :href="route('company.show', $company)" wire:navigate>{{ __('Profile') }}</flux:navlist.item>
-                <flux:navlist.item :href="route('security.edit')" wire:navigate>{{ __('Purchases') }}</flux:navlist.item>
-                <flux:navlist.item :href="route('appearance.edit')" wire:navigate>{{ __('Invoices') }}</flux:navlist.item>
+                <flux:navlist.item icon="building-storefront" :href="route('company.show', $company)" wire:navigate>{{ __('Profile') }}</flux:navlist.item>
+                <flux:navlist.item icon="gift" :href="route('company.orders', $company)" wire:navigate>{{ __('Purchases') }}</flux:navlist.item>
+                <flux:navlist.item :icon="($summary?->terms == 'Credit Card at Time of Purchase' ? 'credit-card' : 'banknotes')" :href="route('appearance.edit')" wire:navigate>{{ __('Invoices') }}</flux:navlist.item>
                 <flux:navlist.group :heading="__('Marketing')" expandable :expanded="false">
                     <flux:navlist.item href="#">{{ __('Landing Page') }}</flux:navlist.item>
                     <flux:navlist.item href="#">{{ __('Fliers') }}</flux:navlist.item>
@@ -17,8 +21,8 @@
                     <flux:navlist.item href="#">{{ __('Customers') }}</flux:navlist.item>
                     <flux:navlist.item href="#">{{ __('Settings') }}</flux:navlist.item>
                 </flux:navlist.group>
-                <flux:navlist.item :href="route('appearance.edit')" wire:navigate>{{ __('Users') }}</flux:navlist.item>
-                <flux:navlist.item :href="route('appearance.edit')" wire:navigate>{{ __('Settings') }}</flux:navlist.item>
+                <flux:navlist.item icon="user-group" :href="route('appearance.edit')" wire:navigate>{{ __('Users') }}</flux:navlist.item>
+                <flux:navlist.item icon="cog-8-tooth" :href="route('appearance.edit')" wire:navigate>{{ __('Settings') }}</flux:navlist.item>
             </flux:navlist>
         </div>
 
