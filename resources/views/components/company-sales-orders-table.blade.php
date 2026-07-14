@@ -83,10 +83,10 @@ new class extends Component {
         }
 
         if ($this->snapshot->status === CompanySnapshot::STATUS_SYNCING_TRANSACTIONS) {
-            return __('Syncing from NetSuite');
+            return __('Syncing from servers');
         }
 
-        return __('Waiting for NetSuite sync');
+        return __('Waiting for sync');
     }
 
     public function sort(string $column): void
@@ -161,8 +161,8 @@ new class extends Component {
             <flux:heading size="sm">{{ $this->shouldPoll ? __('Sales orders are syncing') : __('No sales orders found') }}</flux:heading>
             <flux:text>
                 {{ $this->shouldPoll
-                    ? __('NetSuite sales orders are still being pulled into the company snapshot.')
-                    : __('No NetSuite sales orders were found in the company snapshot.') }}
+                    ? __('Sales orders are still being pulled in from our servers.')
+                    : __('No sales orders were found in the company data source.') }}
             </flux:text>
         </div>
     @else

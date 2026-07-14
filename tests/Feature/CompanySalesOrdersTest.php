@@ -193,6 +193,6 @@ it('shows a lightweight syncing state while transaction sync is pending', functi
 
     Livewire::test('components::company-sales-orders-table', ['snapshotId' => $snapshot->id])
         ->assertSee('Sales orders are syncing')
-        ->assertSee('NetSuite sales orders are still being pulled into the company snapshot.')
+        ->assertSee('Sales orders are still being pulled in from our servers.')
         ->assertSee('wire:poll.visible.5s', false);
 });
