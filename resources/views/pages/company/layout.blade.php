@@ -33,8 +33,15 @@
             <flux:heading>{{ $heading ?? '' }}</flux:heading>
             <flux:subheading>{{ $subheading ?? '' }}</flux:subheading>
 
-            <div class="mt-5 w-full max-w-lg">
-                {{ $slot }}
+            <div class="flex flex-col sm:flex-row">
+                <div class="mt-5 w-full sm:max-w-2/3">
+                    {{ $slot }}
+                </div>
+                <sidebar class="order-first sm:order-last w-full sm:max-w-1/3">
+                    @isset($sidebar)
+                        {{ $sidebar }}
+                    @endisset
+                </sidebar>
             </div>
         </div>
     </div>
