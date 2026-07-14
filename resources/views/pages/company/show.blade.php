@@ -49,6 +49,6 @@ new class extends Component {
 
 <section class="w-full">
     <x-pages::company.layout :company="$netsuiteCompanyId">
-        <pre class="overflow-auto rounded-lg bg-zinc-950 p-4 text-xs leading-relaxed text-zinc-50">{{ json_encode($this->debugSnapshot, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) }}</pre>
+        asdf
     </x-pages::company.layout>
 </section>

@@ -38,6 +38,7 @@ it('creates a dynamic sqlite snapshot database for a company', function (): void
         ->and(File::exists($snapshot->database_path))->toBeTrue()
         ->and(Schema::connection($snapshot->connection_name)->hasTable('meta'))->toBeTrue()
         ->and(Schema::connection($snapshot->connection_name)->hasTable('transactions'))->toBeTrue()
+        ->and(Schema::connection($snapshot->connection_name)->hasColumn('transactions', 'other_ref_num'))->toBeTrue()
         ->and(Schema::connection($snapshot->connection_name)->hasTable('transaction_lines'))->toBeTrue()
         ->and(Schema::connection($snapshot->connection_name)->hasTable('sync_state'))->toBeTrue();
 });
@@ -150,6 +151,7 @@ it('syncs transactions into sqlite and compiles central reporting summary', func
                 [
                     'id' => '9002',
                     'tranid' => 'SO1001',
+                    'otherrefnum' => 'PO-1001',
                     'type' => 'SalesOrd',
                     'trandate' => now()->toDateString(),
                     'status' => 'Pending Fulfillment',
@@ -175,6 +177,7 @@ it('syncs transactions into sqlite and compiles central reporting summary', func
 
     expect($connection->table('transactions')->count())->toBe(2)
         ->and($connection->table('transaction_lines')->count())->toBe(2)
+        ->and($connection->table('transactions')->where('tranid', 'SO1001')->value('other_ref_num'))->toBe('PO-1001')
         ->and($summary->transaction_count)->toBe(2)
         ->and($summary->invoice_total)->toBe('1250.50')
         ->and($summary->open_order_total)->toBe('250.00')

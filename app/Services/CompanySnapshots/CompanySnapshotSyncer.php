@@ -228,6 +228,7 @@ class CompanySnapshotSyncer
         $rows = collect($transactions)->map(fn (array $transaction): array => [
             'netsuite_id' => $transaction['netsuite_id'],
             'tranid' => $transaction['tranid'],
+            'other_ref_num' => $transaction['other_ref_num'] ?? null,
             'type' => $transaction['type'],
             'status' => $transaction['status'],
             'trandate' => $transaction['trandate'],
@@ -245,7 +246,7 @@ class CompanySnapshotSyncer
         $connection->table('transactions')->upsert(
             $rows,
             ['netsuite_id'],
-            ['tranid', 'type', 'status', 'trandate', 'total', 'foreign_total', 'currency', 'memo', 'last_modified_at', 'raw_payload', 'synced_at', 'updated_at'],
+            ['tranid', 'other_ref_num', 'type', 'status', 'trandate', 'total', 'foreign_total', 'currency', 'memo', 'last_modified_at', 'raw_payload', 'synced_at', 'updated_at'],
         );
     }
 

@@ -84,6 +84,7 @@ class CompanySnapshotDatabaseManager
                 $table->id();
                 $table->unsignedBigInteger('netsuite_id')->unique();
                 $table->string('tranid')->nullable()->index();
+                $table->string('other_ref_num')->nullable()->index();
                 $table->string('type')->nullable()->index();
                 $table->string('status')->nullable()->index();
                 $table->date('trandate')->nullable()->index();
@@ -95,6 +96,13 @@ class CompanySnapshotDatabaseManager
                 $table->text('raw_payload')->nullable();
                 $table->timestamp('synced_at')->nullable()->index();
                 $table->timestamps();
+            });
+        }
+
+        if (Schema::connection($connection)->hasTable('transactions')
+            && ! Schema::connection($connection)->hasColumn('transactions', 'other_ref_num')) {
+            Schema::connection($connection)->table('transactions', function ($table): void {
+                $table->string('other_ref_num')->nullable()->index();
             });
         }
 

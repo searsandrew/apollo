@@ -34,14 +34,14 @@
             <flux:subheading>{{ $subheading ?? '' }}</flux:subheading>
 
             <div class="flex flex-col sm:flex-row">
-                <div class="mt-5 w-full sm:max-w-2/3">
+                <div @class(['mt-5 w-full', 'sm:w-2/3 mr-5' => isset($sidebar)])>
                     {{ $slot }}
                 </div>
-                <sidebar class="order-first sm:order-last w-full sm:max-w-1/3">
-                    @isset($sidebar)
+                @isset($sidebar)
+                    <sidebar class="order-first sm:order-last w-full sm:max-w-1/3">
                         {{ $sidebar }}
-                    @endisset
-                </sidebar>
+                    </sidebar>
+                @endisset
             </div>
         </div>
     </div>

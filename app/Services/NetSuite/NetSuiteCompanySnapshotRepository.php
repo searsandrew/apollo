@@ -72,6 +72,7 @@ class NetSuiteCompanySnapshotRepository
             SELECT
                 id,
                 tranid,
+                otherrefnum,
                 type,
                 trandate,
                 status,
@@ -100,6 +101,7 @@ class NetSuiteCompanySnapshotRepository
             $transactions[] = [
                 'netsuite_id' => (int) $transaction['id'],
                 'tranid' => $this->nullableString($transaction['tranid'] ?? null),
+                'other_ref_num' => $this->nullableString($transaction['otherrefnum'] ?? null),
                 'type' => $this->nullableString($transaction['type'] ?? null),
                 'trandate' => $this->nullableString($transaction['trandate'] ?? null),
                 'status' => $this->nullableString($transaction['status'] ?? null),
