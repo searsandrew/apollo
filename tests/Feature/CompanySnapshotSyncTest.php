@@ -50,6 +50,7 @@ it('syncs company meta into the snapshot sqlite database and central summary', f
                 'entityid' => 'ACME-286',
                 'account_number' => 'A-0121',
                 'companyname' => 'Acme Industrial',
+                'terms' => 'Net 30',
                 'email' => 'ap@example.test',
                 'phone' => '555-0100',
                 'url' => 'https://example.test',
@@ -70,9 +71,11 @@ it('syncs company meta into the snapshot sqlite database and central summary', f
     $connection = app(CompanySnapshotDatabaseManager::class)->connection($snapshot);
 
     expect(json_decode($connection->table('meta')->where('key', 'company_name')->value('value'), true))->toBe('Acme Industrial')
+        ->and(json_decode($connection->table('meta')->where('key', 'terms')->value('value'), true))->toBe('Net 30')
         ->and(json_decode($connection->table('meta')->where('key', 'sales_rep_id')->value('value'), true))->toBe(1439)
         ->and($snapshot->refresh()->meta_synced_at)->not->toBeNull()
-        ->and($snapshot->summary()->first()?->company_name)->toBe('Acme Industrial');
+        ->and($snapshot->summary()->first()?->company_name)->toBe('Acme Industrial')
+        ->and($snapshot->summary()->first()?->terms)->toBe('Net 30');
 });
 
 it('syncs transactions into sqlite and compiles central reporting summary', function (): void {
@@ -87,6 +90,7 @@ it('syncs transactions into sqlite and compiles central reporting summary', func
                         'entityid' => 'ACME-286',
                         'account_number' => 'A-0121',
                         'companyname' => 'Acme Industrial',
+                        'terms' => 'Net 30',
                         'email' => null,
                         'phone' => null,
                         'url' => null,
@@ -174,7 +178,8 @@ it('syncs transactions into sqlite and compiles central reporting summary', func
         ->and($summary->transaction_count)->toBe(2)
         ->and($summary->invoice_total)->toBe('1250.50')
         ->and($summary->open_order_total)->toBe('250.00')
-        ->and($summary->company_name)->toBe('Acme Industrial');
+        ->and($summary->company_name)->toBe('Acme Industrial')
+        ->and($summary->terms)->toBe('Net 30');
 });
 
 it('dispatches stale snapshot refresh jobs in bounded batches', function (): void {

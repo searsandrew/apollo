@@ -42,6 +42,7 @@ class CompanySnapshotSummaryCompiler
                 'account_number' => $meta['account_number'] ?? null,
                 'company_name' => $meta['company_name'] ?? null,
                 'entity_id' => $meta['entity_id'] ?? null,
+                'terms' => $meta['terms'] ?? null,
                 'sales_rep_id' => $meta['sales_rep_id'] ?? null,
                 'last_transaction_date' => $transactions->max('trandate'),
                 'ytd_sales' => $this->sumTransactionsSince($invoiceTransactions, $startOfYear),

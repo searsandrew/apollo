@@ -14,6 +14,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
     'account_number',
     'company_name',
     'entity_id',
+    'terms',
     'sales_rep_id',
     'last_transaction_date',
     'ytd_sales',

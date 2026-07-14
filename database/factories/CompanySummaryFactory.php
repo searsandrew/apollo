@@ -26,6 +26,7 @@ class CompanySummaryFactory extends Factory
             'account_number' => fake()->bothify('C-####'),
             'company_name' => fake()->company(),
             'entity_id' => fake()->bothify('COMP-####'),
+            'terms' => fake()->randomElement(['Net 15', 'Net 30', 'Due on Receipt']),
             'sales_rep_id' => fake()->numberBetween(1, 9999),
             'last_transaction_date' => fake()->date(),
             'ytd_sales' => fake()->randomFloat(2, 0, 100000),
