@@ -31,5 +31,10 @@ it('renders the company header from the summary', function (): void {
 
     Livewire::test('pages::company.show', ['company' => '286'])
         ->assertSee('Acme Industrial')
-        ->assertSee('A-0121');
+        ->assertSee('A-0121')
+        ->assertSee('data-current="data-current"', false)
+        ->call('$refresh')
+        ->assertSee('Acme Industrial')
+        ->assertSee('A-0121')
+        ->assertSee('data-current="data-current"', false);
 });

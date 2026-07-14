@@ -1,7 +1,6 @@
 <?php
 
 use App\Models\CompanySnapshot;
-use App\Models\CompanySummary;
 use App\Services\CompanySnapshots\CompanySnapshotSyncer;
 use Livewire\Attributes\Computed;
 use Livewire\Component;
@@ -29,42 +28,27 @@ new class extends Component {
         abort_if($this->netsuiteCompanyId <= 0, 404);
 
         $snapshot = $this->snapshotSyncer->ensureSnapshot($this->netsuiteCompanyId);
+
         $this->snapshotId = $snapshot->id;
         $this->snapshotSyncer->queueRefreshIfStale($snapshot);
-
-        $this->debug = $this->snapshotSyncer->debugSnapshot($snapshot);
     }
 
     #[Computed]
-    public function snapshot(): ?CompanySnapshot
+    public function snapshot(): CompanySnapshot
     {
-        return CompanySnapshot::query()->find($this->snapshotId);
+        return CompanySnapshot::query()->findOrFail($this->snapshotId);
     }
 
     #[Computed]
-    public function summary(): ?CompanySummary
+    public function debugSnapshot(): array
     {
-        return CompanySummary::query()
-            ->where('company_snapshot_id', $this->snapshotId)
-            ->first();
-    }
-
-    #[Computed]
-    public function companyHeaderReady(): bool
-    {
-        return filled($this->summary?->company_name)
-            && filled($this->summary?->account_number);
+        return $this->snapshotSyncer->debugSnapshot($this->snapshot);
     }
 };
 ?>
 
-<section class="w-full">
-    <x-pages::company.layout
-        :company="$netsuiteCompanyId"
-        :company-name="$this->summary?->company_name"
-        :account-number="$this->summary?->account_number"
-        :loading-company-header="! $this->companyHeaderReady"
-    >
-        <pre class="overflow-auto rounded-lg bg-zinc-950 p-4 text-xs leading-relaxed text-zinc-50">{{ json_encode($debug, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) }}</pre>
+<section class="w-full" wire:poll.visible.1500ms>
+    <x-pages::company.layout :company="$netsuiteCompanyId" current="profile">
+        <pre class="overflow-auto rounded-lg bg-zinc-950 p-4 text-xs leading-relaxed text-zinc-50">{{ json_encode($this->debugSnapshot, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES) }}</pre>
     </x-pages::company.layout>
 </section>
