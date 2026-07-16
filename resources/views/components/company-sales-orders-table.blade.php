@@ -93,15 +93,6 @@ new class extends Component {
         return null;
     }
 
-    public function syncStatusLabel(): string
-    {
-        if ($this->snapshot->transactions_synced_at !== null) {
-            return __('Last synced :time', ['time' => $this->snapshot->transactions_synced_at->diffForHumans()]);
-        }
-
-        return __('Waiting for first sync');
-    }
-
     public function isSyncing(): bool
     {
         return in_array($this->snapshot->status, [
@@ -179,7 +170,87 @@ new class extends Component {
                 <flux:badge size="sm" color="sky" icon="arrow-path" class="animate-pulse">{{ $this->syncActivityLabel() }}</flux:badge>
             @endif
 
-            <small class="italic text-zinc-600 dark:text-zinc-400">{{ $this->syncStatusLabel() }}</small>
+            @php($transactionsSyncedAt = $this->snapshot->transactions_synced_at)
+
+            @if ($transactionsSyncedAt !== null)
+                <small
+                    wire:key="sales-orders-synced-at-{{ $transactionsSyncedAt->getTimestamp() }}"
+                    class="italic text-zinc-600 dark:text-zinc-400"
+                    aria-live="polite"
+                    x-data="{
+                        syncedAt: new Date(@js($transactionsSyncedAt->toIso8601String())),
+                        label: @js($transactionsSyncedAt->diffForHumans()),
+                        timer: null,
+                        init() {
+                            this.update()
+                            this.schedule()
+                        },
+                        destroy() {
+                            clearTimeout(this.timer)
+                        },
+                        elapsedSeconds() {
+                            return Math.max(0, Math.floor((Date.now() - this.syncedAt.getTime()) / 1000))
+                        },
+                        schedule() {
+                            clearTimeout(this.timer)
+
+                            this.timer = setTimeout(() => {
+                                this.update()
+                                this.schedule()
+                            }, this.elapsedSeconds() < 60 ? 10000 : 60000)
+                        },
+                        update() {
+                            const seconds = this.elapsedSeconds()
+
+                            if (seconds < 5) {
+                                this.label = 'just now'
+                                return
+                            }
+
+                            if (seconds < 60) {
+                                this.label = `${seconds} seconds ago`
+                                return
+                            }
+
+                            const minutes = Math.floor(seconds / 60)
+
+                            if (minutes < 60) {
+                                this.label = `${minutes} ${minutes === 1 ? 'minute' : 'minutes'} ago`
+                                return
+                            }
+
+                            const hours = Math.floor(minutes / 60)
+
+                            if (hours < 24) {
+                                this.label = `${hours} ${hours === 1 ? 'hour' : 'hours'} ago`
+                                return
+                            }
+
+                            const days = Math.floor(hours / 24)
+
+                            if (days < 30) {
+                                this.label = `${days} ${days === 1 ? 'day' : 'days'} ago`
+                                return
+                            }
+
+                            const months = Math.floor(days / 30)
+
+                            if (months < 12) {
+                                this.label = `${months} ${months === 1 ? 'month' : 'months'} ago`
+                                return
+                            }
+
+                            const years = Math.floor(days / 365)
+
+                            this.label = `${years} ${years === 1 ? 'year' : 'years'} ago`
+                        },
+                    }"
+                >
+                    {{ __('Last synced') }} <span x-text="label">{{ $transactionsSyncedAt->diffForHumans() }}</span>
+                </small>
+            @else
+                <small class="italic text-zinc-600 dark:text-zinc-400">{{ __('Waiting for first sync') }}</small>
+            @endif
         </div>
     </div>
 

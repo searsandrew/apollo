@@ -205,6 +205,29 @@ it('sorts sales orders by the selected sortable column', function (): void {
         ->assertSeeHtmlInOrder(['PO-1000', 'PO-0999']);
 });
 
+it('renders the last synced timestamp as a client-side relative timer', function (): void {
+    $syncedAt = now()->subSeconds(30)->startOfSecond();
+
+    $snapshot = CompanySnapshot::factory()->create([
+        'netsuite_company_id' => 286,
+        'status' => CompanySnapshot::STATUS_ACTIVE,
+        'meta_synced_at' => now(),
+        'transactions_synced_at' => $syncedAt,
+        'summary_synced_at' => now(),
+    ]);
+
+    app(CompanySnapshotDatabaseManager::class)->ensureDatabase($snapshot);
+
+    Livewire::test('components::company-sales-orders-table', ['snapshotId' => $snapshot->id])
+        ->assertSee('Last synced')
+        ->assertSee("sales-orders-synced-at-{$syncedAt->getTimestamp()}", false)
+        ->assertSee('x-data', false)
+        ->assertSee('setTimeout', false)
+        ->assertSee('10000', false)
+        ->assertSee('60000', false)
+        ->assertDontSee('wire:poll.visible.5s', false);
+});
+
 it('shows when stale sales order data is checking for updates', function (): void {
     $snapshot = CompanySnapshot::factory()->create([
         'netsuite_company_id' => 286,
