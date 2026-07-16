@@ -24,7 +24,7 @@ new class extends Component {
         $snapshot = $this->snapshotSyncer->ensureSnapshot($this->netsuiteCompanyId);
 
         $this->snapshotId = $snapshot->id;
-        $this->snapshotSyncer->queueRefreshIfStale($snapshot);
+        $this->snapshotSyncer->queueRefreshIfStale($snapshot, transactionStaleDays: 1);
     }
 };
 ?>

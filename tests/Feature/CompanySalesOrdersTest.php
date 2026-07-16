@@ -1,6 +1,7 @@
 <?php
 
 use App\Jobs\SyncCompanySnapshotMeta;
+use App\Jobs\SyncCompanySnapshotTransactions;
 use App\Models\CompanySnapshot;
 use App\Services\CompanySnapshots\CompanySnapshotDatabaseManager;
 use App\Services\CompanySnapshots\CompanySnapshotSalesOrderRepository;
@@ -28,6 +29,28 @@ it('loads the company snapshot and queues a stale refresh from the sales orders 
     Queue::assertPushed(
         SyncCompanySnapshotMeta::class,
         fn (SyncCompanySnapshotMeta $job): bool => $job->companySnapshotId === $snapshot->id,
+    );
+});
+
+it('queues a transaction refresh for sales order data older than one day', function (): void {
+    Queue::fake();
+
+    $snapshot = CompanySnapshot::factory()->create([
+        'netsuite_company_id' => 286,
+        'status' => CompanySnapshot::STATUS_ACTIVE,
+        'meta_synced_at' => now(),
+        'transactions_synced_at' => now()->subDays(2),
+        'summary_synced_at' => now()->subDays(2),
+    ]);
+
+    app(CompanySnapshotDatabaseManager::class)->ensureDatabase($snapshot);
+
+    Livewire::test('pages::company.sales-orders', ['company' => '286'])
+        ->assertSet('snapshotId', $snapshot->id);
+
+    Queue::assertPushed(
+        SyncCompanySnapshotTransactions::class,
+        fn (SyncCompanySnapshotTransactions $job): bool => $job->companySnapshotId === $snapshot->id,
     );
 });
 
@@ -180,6 +203,76 @@ it('sorts sales orders by the selected sortable column', function (): void {
         ->assertSet('sortBy', 'po_number')
         ->assertSet('sortDirection', 'desc')
         ->assertSeeHtmlInOrder(['PO-1000', 'PO-0999']);
+});
+
+it('shows when stale sales order data is checking for updates', function (): void {
+    $snapshot = CompanySnapshot::factory()->create([
+        'netsuite_company_id' => 286,
+        'status' => CompanySnapshot::STATUS_ACTIVE,
+        'meta_synced_at' => now(),
+        'transactions_synced_at' => now()->subDays(2),
+        'summary_synced_at' => now()->subDays(2),
+    ]);
+
+    $connection = app(CompanySnapshotDatabaseManager::class)->ensureDatabase($snapshot);
+
+    $connection->table('transactions')->insert([
+        'netsuite_id' => 9002,
+        'tranid' => 'SO999',
+        'other_ref_num' => 'PO-0999',
+        'type' => 'SalesOrd',
+        'status' => 'B',
+        'trandate' => '2026-01-03',
+        'total' => '250.00',
+        'foreign_total' => '250.00',
+        'currency' => 'USD',
+        'memo' => 'Order',
+        'last_modified_at' => '2026-01-03 16:05:00',
+        'raw_payload' => '{}',
+        'synced_at' => '2026-01-03 16:10:00',
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
+
+    Livewire::test('components::company-sales-orders-table', ['snapshotId' => $snapshot->id])
+        ->assertSee('Checking for updates')
+        ->assertSee('Last synced')
+        ->assertSee('wire:poll.visible.5s', false);
+});
+
+it('shows when sales order data is actively refreshing', function (): void {
+    $snapshot = CompanySnapshot::factory()->create([
+        'netsuite_company_id' => 286,
+        'status' => CompanySnapshot::STATUS_SYNCING_TRANSACTIONS,
+        'meta_synced_at' => now(),
+        'transactions_synced_at' => now()->subDays(2),
+        'summary_synced_at' => now()->subDays(2),
+    ]);
+
+    $connection = app(CompanySnapshotDatabaseManager::class)->ensureDatabase($snapshot);
+
+    $connection->table('transactions')->insert([
+        'netsuite_id' => 9002,
+        'tranid' => 'SO999',
+        'other_ref_num' => 'PO-0999',
+        'type' => 'SalesOrd',
+        'status' => 'B',
+        'trandate' => '2026-01-03',
+        'total' => '250.00',
+        'foreign_total' => '250.00',
+        'currency' => 'USD',
+        'memo' => 'Order',
+        'last_modified_at' => '2026-01-03 16:05:00',
+        'raw_payload' => '{}',
+        'synced_at' => '2026-01-03 16:10:00',
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
+
+    Livewire::test('components::company-sales-orders-table', ['snapshotId' => $snapshot->id])
+        ->assertSee('Refreshing data')
+        ->assertSee('Last synced')
+        ->assertSee('wire:poll.visible.5s', false);
 });
 
 it('shows a lightweight syncing state while transaction sync is pending', function (): void {

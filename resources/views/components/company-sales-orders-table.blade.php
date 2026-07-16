@@ -40,6 +40,8 @@ new class extends Component {
         'H' => 'zinc',
     ];
 
+    private const int TRANSACTION_STALE_DAYS = 1;
+
     public int $snapshotId;
 
     public string $sortBy = CompanySnapshotSalesOrderRepository::DEFAULT_SORT_BY;
@@ -73,20 +75,39 @@ new class extends Component {
     public function shouldPoll(): bool
     {
         return $this->snapshot->transactions_synced_at === null
-            || $this->snapshot->status === CompanySnapshot::STATUS_SYNCING_TRANSACTIONS;
+            || $this->isSyncing()
+            || $this->snapshot->isMetaStale()
+            || $this->snapshot->areTransactionsStale(self::TRANSACTION_STALE_DAYS);
+    }
+
+    public function syncActivityLabel(): ?string
+    {
+        if ($this->isSyncing()) {
+            return __('Refreshing data');
+        }
+
+        if ($this->shouldPoll) {
+            return __('Checking for updates');
+        }
+
+        return null;
     }
 
     public function syncStatusLabel(): string
     {
         if ($this->snapshot->transactions_synced_at !== null) {
-            return __('Synced :time', ['time' => $this->snapshot->transactions_synced_at->diffForHumans()]);
+            return __('Last synced :time', ['time' => $this->snapshot->transactions_synced_at->diffForHumans()]);
         }
 
-        if ($this->snapshot->status === CompanySnapshot::STATUS_SYNCING_TRANSACTIONS) {
-            return __('Syncing from servers');
-        }
+        return __('Waiting for first sync');
+    }
 
-        return __('Waiting for sync');
+    public function isSyncing(): bool
+    {
+        return in_array($this->snapshot->status, [
+            CompanySnapshot::STATUS_SYNCING_META,
+            CompanySnapshot::STATUS_SYNCING_TRANSACTIONS,
+        ], true);
     }
 
     public function sort(string $column): void
@@ -153,7 +174,13 @@ new class extends Component {
             <flux:text>{{ __('Orders currently submitted and processed by :company.', ['company' => config('app.name')]) }}</flux:text>
         </div>
 
-        <small class="shrink-0 italic text-zinc-600 dark:text-zinc-400">{{ $this->syncStatusLabel() }}</small>
+        <div class="flex shrink-0 flex-col items-end gap-1">
+            @if ($this->syncActivityLabel())
+                <flux:badge size="sm" color="sky" icon="arrow-path" class="animate-pulse">{{ $this->syncActivityLabel() }}</flux:badge>
+            @endif
+
+            <small class="italic text-zinc-600 dark:text-zinc-400">{{ $this->syncStatusLabel() }}</small>
+        </div>
     </div>
 
     @if ($this->salesOrders->count() === 0)
@@ -197,7 +224,27 @@ new class extends Component {
                         </flux:table.cell>
                         <flux:table.cell>{{ Number::currency((float) $salesOrder->total, in: $this->currencyCode($salesOrder->currency)) }}</flux:table.cell>
                         <flux:table.cell align="end" class="w-12 py-0">
-                            <flux:button variant="ghost" size="sm" icon="ellipsis-horizontal" aria-label="{{ __('Order actions') }}"></flux:button>
+                            <flux:dropdown align="end">
+                                <flux:button variant="ghost" size="sm" icon="ellipsis-horizontal" aria-label="{{ __('Order actions') }}"></flux:button>
+                                <flux:menu>
+                                    @can('create order')
+                                        <flux:menu.item icon="document-text">{{ __('View Purchase Order') }}</flux:menu.item>
+                                    @endcan
+                                    @can('view order')
+                                        <flux:menu.item icon="document-magnifying-glass">{{ __('View Sales Order') }}</flux:menu.item>
+                                    @endcan
+                                    @can('view invoice')
+                                        <flux:menu.item icon="document-currency-dollar">{{ __('View Invoice') }}</flux:menu.item>
+                                    @endcan
+                                    <flux:menu.separator />
+                                    @can('view order')
+                                        <flux:menu.item icon="truck">{{ __('Track Shipment') }}</flux:menu.item>
+                                    @endcan
+                                    @can('create return')
+                                        <flux:menu.item icon="receipt-refund">{{ __('Return Good Authorization') }}</flux:menu.item>
+                                    @endcan
+                                </flux:menu>
+                            </flux:dropdown>
                         </flux:table.cell>
                     </flux:table.row>
                 @endforeach
