@@ -2,7 +2,10 @@
 
 use App\Models\CompanySnapshot;
 use App\Services\CompanySnapshots\CompanySnapshotSalesOrderRepository;
+use App\Services\CompanySnapshots\CompanySnapshotSyncer;
+use Carbon\CarbonInterface;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Number;
 use Livewire\Attributes\Computed;
@@ -50,9 +53,14 @@ new class extends Component {
 
     private CompanySnapshotSalesOrderRepository $salesOrderRepository;
 
-    public function boot(CompanySnapshotSalesOrderRepository $salesOrderRepository): void
-    {
+    private CompanySnapshotSyncer $snapshotSyncer;
+
+    public function boot(
+        CompanySnapshotSalesOrderRepository $salesOrderRepository,
+        CompanySnapshotSyncer $snapshotSyncer,
+    ): void {
         $this->salesOrderRepository = $salesOrderRepository;
+        $this->snapshotSyncer = $snapshotSyncer;
     }
 
     #[Computed]
@@ -91,6 +99,33 @@ new class extends Component {
         }
 
         return null;
+    }
+
+    public function syncStartedAt(): ?CarbonInterface
+    {
+        if ($this->snapshot->transactions_synced_at === null) {
+            return $this->snapshot->created_at;
+        }
+
+        return $this->snapshot->updated_at;
+    }
+
+    public function refreshSyncState(): void
+    {
+        unset($this->snapshot, $this->salesOrders);
+
+        if (! $this->shouldPoll || $this->isSyncing()) {
+            return;
+        }
+
+        if (! Cache::add($this->refreshQueueCacheKey(), true, now()->addMinute())) {
+            return;
+        }
+
+        $this->snapshotSyncer->queueRefreshIfStale(
+            $this->snapshot,
+            transactionStaleDays: self::TRANSACTION_STALE_DAYS,
+        );
     }
 
     public function isSyncing(): bool
@@ -155,10 +190,15 @@ new class extends Component {
 
         return 'USD';
     }
+
+    private function refreshQueueCacheKey(): string
+    {
+        return 'company-snapshot:refresh-queued:'.$this->snapshotId;
+    }
 };
 ?>
 
-<div @if ($this->shouldPoll) wire:poll.visible.5s @endif>
+<div @if ($this->shouldPoll) wire:poll.visible.5s="refreshSyncState" @endif>
     <div class="mb-3 flex w-full flex-row items-center justify-between gap-4">
         <div class="flex flex-col">
             <flux:heading size="lg">{{ __('Sales Orders') }}</flux:heading>
@@ -167,7 +207,13 @@ new class extends Component {
 
         <div class="flex shrink-0 flex-col items-end gap-1">
             @if ($this->syncActivityLabel())
-                <flux:badge size="sm" color="sky" icon="arrow-path" class="animate-pulse">{{ $this->syncActivityLabel() }}</flux:badge>
+                <flux:badge size="sm" color="sky">
+                    <span class="inline-flex items-center gap-1.5">
+                        <flux:icon.loading class="size-3" />
+                        <span wire:loading.remove>{{ $this->syncActivityLabel() }}</span>
+                        <span wire:loading>{{ __('Checking now') }}</span>
+                    </span>
+                </flux:badge>
             @endif
 
             @php($transactionsSyncedAt = $this->snapshot->transactions_synced_at)
@@ -191,14 +237,44 @@ new class extends Component {
     </div>
 
     @if ($this->salesOrders->count() === 0)
-        <div class="rounded-lg border border-dashed border-zinc-200 p-6 dark:border-zinc-700">
-            <flux:heading size="sm">{{ $this->shouldPoll ? __('Sales orders are syncing') : __('No sales orders found') }}</flux:heading>
-            <flux:text>
-                {{ $this->shouldPoll
-                    ? __('Sales orders are still being pulled in from our servers.')
-                    : __('No sales orders were found in the company data source.') }}
-            </flux:text>
-        </div>
+        @if ($this->shouldPoll)
+            @php($syncStartedAt = $this->syncStartedAt())
+
+            <div class="rounded-lg border border-dashed border-sky-200 bg-sky-50/40 p-6 dark:border-sky-900/70 dark:bg-sky-950/20">
+                <div class="flex items-start gap-3">
+                    <div class="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-full bg-sky-100 text-sky-700 dark:bg-sky-900/50 dark:text-sky-300">
+                        <flux:icon.loading class="size-5" />
+                    </div>
+
+                    <div class="min-w-0">
+                        <flux:heading size="sm">{{ __('Sales orders are syncing') }}</flux:heading>
+                        <flux:text>{{ __('We are checking our servers. This page will update automatically as soon as sales orders are available.') }}</flux:text>
+
+                        <div class="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-zinc-600 dark:text-zinc-400" aria-live="polite">
+                            <span wire:loading.remove>{{ __('Waiting for next check') }}</span>
+                            <span wire:loading>{{ __('Checking now') }}</span>
+
+                            @if ($syncStartedAt !== null)
+                                <span aria-hidden="true">&middot;</span>
+                                <span
+                                    x-data="relativeTime({
+                                        timestamp: @js($syncStartedAt->toIso8601String()),
+                                        fallback: @js($syncStartedAt->diffForHumans()),
+                                    })"
+                                >
+                                    {{ __('Started') }} <span x-text="label">{{ $syncStartedAt->diffForHumans() }}</span>
+                                </span>
+                            @endif
+                        </div>
+                    </div>
+                </div>
+            </div>
+        @else
+            <div class="rounded-lg border border-dashed border-zinc-200 p-6 dark:border-zinc-700">
+                <flux:heading size="sm">{{ __('No sales orders found') }}</flux:heading>
+                <flux:text>{{ __('No sales orders were found in the company data source.') }}</flux:text>
+            </div>
+        @endif
     @else
         <flux:table class="w-full" :paginate="$this->salesOrders">
             <flux:table.columns sticky class="bg-white dark:bg-zinc-900">

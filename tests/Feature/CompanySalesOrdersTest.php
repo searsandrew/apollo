@@ -6,6 +6,7 @@ use App\Models\CompanySnapshot;
 use App\Services\CompanySnapshots\CompanySnapshotDatabaseManager;
 use App\Services\CompanySnapshots\CompanySnapshotSalesOrderRepository;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Queue;
 use Livewire\Livewire;
@@ -52,6 +53,50 @@ it('queues a transaction refresh for sales order data older than one day', funct
         SyncCompanySnapshotTransactions::class,
         fn (SyncCompanySnapshotTransactions $job): bool => $job->companySnapshotId === $snapshot->id,
     );
+});
+
+it('queues the missing transaction refresh while the sales orders table polls', function (): void {
+    Queue::fake();
+    Cache::flush();
+
+    $snapshot = CompanySnapshot::factory()->create([
+        'netsuite_company_id' => 286,
+        'status' => CompanySnapshot::STATUS_ACTIVE,
+        'meta_synced_at' => now(),
+        'transactions_synced_at' => null,
+        'summary_synced_at' => null,
+    ]);
+
+    app(CompanySnapshotDatabaseManager::class)->ensureDatabase($snapshot);
+
+    Livewire::test('components::company-sales-orders-table', ['snapshotId' => $snapshot->id])
+        ->call('refreshSyncState');
+
+    Queue::assertPushed(
+        SyncCompanySnapshotTransactions::class,
+        fn (SyncCompanySnapshotTransactions $job): bool => $job->companySnapshotId === $snapshot->id,
+    );
+});
+
+it('throttles transaction refresh queueing while the sales orders table polls', function (): void {
+    Queue::fake();
+    Cache::flush();
+
+    $snapshot = CompanySnapshot::factory()->create([
+        'netsuite_company_id' => 286,
+        'status' => CompanySnapshot::STATUS_ACTIVE,
+        'meta_synced_at' => now(),
+        'transactions_synced_at' => null,
+        'summary_synced_at' => null,
+    ]);
+
+    app(CompanySnapshotDatabaseManager::class)->ensureDatabase($snapshot);
+
+    Livewire::test('components::company-sales-orders-table', ['snapshotId' => $snapshot->id])
+        ->call('refreshSyncState')
+        ->call('refreshSyncState');
+
+    Queue::assertPushed(SyncCompanySnapshotTransactions::class, 1);
 });
 
 it('renders paginated NetSuite sales orders from the company snapshot', function (): void {
@@ -259,6 +304,7 @@ it('shows when stale sales order data is checking for updates', function (): voi
 
     Livewire::test('components::company-sales-orders-table', ['snapshotId' => $snapshot->id])
         ->assertSee('Checking for updates')
+        ->assertSee('Checking now')
         ->assertSee('Last synced')
         ->assertSee('wire:poll.visible.5s', false);
 });
@@ -294,6 +340,7 @@ it('shows when sales order data is actively refreshing', function (): void {
 
     Livewire::test('components::company-sales-orders-table', ['snapshotId' => $snapshot->id])
         ->assertSee('Refreshing data')
+        ->assertSee('Checking now')
         ->assertSee('Last synced')
         ->assertSee('wire:poll.visible.5s', false);
 });
@@ -309,6 +356,10 @@ it('shows a lightweight syncing state while transaction sync is pending', functi
 
     Livewire::test('components::company-sales-orders-table', ['snapshotId' => $snapshot->id])
         ->assertSee('Sales orders are syncing')
-        ->assertSee('Sales orders are still being pulled in from our servers.')
+        ->assertSee('We are checking our servers. This page will update automatically as soon as sales orders are available.')
+        ->assertSee('Waiting for next check')
+        ->assertSee('Checking now')
+        ->assertSee('Started')
+        ->assertSee('x-data="relativeTime', false)
         ->assertSee('wire:poll.visible.5s', false);
 });
