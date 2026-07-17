@@ -8,11 +8,14 @@ use App\Jobs\SyncCompanySnapshotTransactions;
 use App\Models\CompanySnapshot;
 use App\Models\CompanySummary;
 use App\Services\NetSuite\NetSuiteCompanySnapshotRepository;
+use Illuminate\Support\Carbon;
 use RuntimeException;
 use Throwable;
 
 class CompanySnapshotSyncer
 {
+    private const int INCREMENTAL_OVERLAP_MINUTES = 5;
+
     public function __construct(
         private readonly CompanySnapshotDatabaseManager $databaseManager,
         private readonly NetSuiteCompanySnapshotRepository $netSuite,
@@ -111,7 +114,7 @@ class CompanySnapshotSyncer
         }
     }
 
-    public function syncTransactions(CompanySnapshot $snapshot): CompanySnapshot
+    public function syncTransactions(CompanySnapshot $snapshot, bool $full = false): CompanySnapshot
     {
         try {
             $snapshot->forceFill([
@@ -125,26 +128,45 @@ class CompanySnapshotSyncer
             $transactionOffset = 0;
             $transactionLineOffset = 0;
             $limit = 1000;
+            $previousCursor = $this->transactionCursor($snapshot);
+            $modifiedSince = $full ? null : $this->incrementalModifiedSince($previousCursor);
+            $syncMode = $modifiedSince === null ? 'full' : 'incremental';
+            $transactionCount = 0;
+            $transactionLineCount = 0;
 
             do {
-                $page = $this->netSuite->fetchTransactionPage($snapshot->netsuite_company_id, $limit, $transactionOffset);
+                $page = $this->netSuite->fetchTransactionPage($snapshot->netsuite_company_id, $limit, $transactionOffset, $modifiedSince);
                 $this->writeTransactions($snapshot, $page['items']);
+                $transactionCount += count($page['items']);
                 $transactionOffset += $limit;
             } while ($page['has_more']);
 
-            do {
-                $page = $this->netSuite->fetchTransactionLinePage($snapshot->netsuite_company_id, $limit, $transactionLineOffset);
-                $this->writeTransactionLines($snapshot, $page['items']);
-                $transactionLineOffset += $limit;
-            } while ($page['has_more']);
+            if ($syncMode === 'full' || $transactionCount > 0) {
+                do {
+                    $page = $this->netSuite->fetchTransactionLinePage($snapshot->netsuite_company_id, $limit, $transactionLineOffset, $modifiedSince);
+                    $this->writeTransactionLines($snapshot, $page['items']);
+                    $transactionLineCount += count($page['items']);
+                    $transactionLineOffset += $limit;
+                } while ($page['has_more']);
+            }
+
+            $currentCursor = $this->latestTransactionLastModifiedAt($snapshot) ?? $previousCursor;
 
             $this->writeSyncState($snapshot, 'transactions', [
+                'mode' => $syncMode,
+                'previous_cursor' => $previousCursor,
+                'modified_since' => $modifiedSince,
+                'fetched_count' => $transactionCount,
                 'last_offset' => $transactionOffset,
-            ]);
+            ], $currentCursor);
 
             $this->writeSyncState($snapshot, 'transaction_lines', [
+                'mode' => $syncMode,
+                'transaction_cursor' => $currentCursor,
+                'transaction_modified_since' => $modifiedSince,
+                'fetched_count' => $transactionLineCount,
                 'last_offset' => $transactionLineOffset,
-            ]);
+            ], $currentCursor);
 
             $snapshot->forceFill([
                 'status' => CompanySnapshot::STATUS_ACTIVE,
@@ -287,20 +309,70 @@ class CompanySnapshotSyncer
     /**
      * @param  array<string, mixed>  $payload
      */
-    private function writeSyncState(CompanySnapshot $snapshot, string $scope, array $payload): void
+    private function writeSyncState(CompanySnapshot $snapshot, string $scope, array $payload, ?string $cursorValue = null): void
     {
         $now = now();
 
         $this->databaseManager->connection($snapshot)->table('sync_state')->upsert([
             [
                 'scope' => $scope,
-                'cursor_value' => null,
+                'cursor_value' => $cursorValue,
                 'synced_at' => $now,
                 'payload' => json_encode($payload, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES),
                 'created_at' => $now,
                 'updated_at' => $now,
             ],
         ], ['scope'], ['cursor_value', 'synced_at', 'payload', 'updated_at']);
+    }
+
+    private function transactionCursor(CompanySnapshot $snapshot): ?string
+    {
+        $storedCursor = $this->databaseManager->connection($snapshot)
+            ->table('sync_state')
+            ->where('scope', 'transactions')
+            ->value('cursor_value');
+
+        if (filled($storedCursor)) {
+            return $this->normalizeDateTimeString($storedCursor);
+        }
+
+        return $this->latestTransactionLastModifiedAt($snapshot);
+    }
+
+    private function latestTransactionLastModifiedAt(CompanySnapshot $snapshot): ?string
+    {
+        return $this->databaseManager->connection($snapshot)
+            ->table('transactions')
+            ->whereNotNull('last_modified_at')
+            ->pluck('last_modified_at')
+            ->filter()
+            ->map(fn (mixed $lastModifiedAt): ?string => $this->normalizeDateTimeString($lastModifiedAt))
+            ->filter()
+            ->max();
+    }
+
+    private function incrementalModifiedSince(?string $cursor): ?string
+    {
+        if ($cursor === null) {
+            return null;
+        }
+
+        return Carbon::parse($cursor)
+            ->subMinutes(self::INCREMENTAL_OVERLAP_MINUTES)
+            ->format('Y-m-d H:i:s');
+    }
+
+    private function normalizeDateTimeString(mixed $value): ?string
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+
+        try {
+            return Carbon::parse((string) $value)->format('Y-m-d H:i:s');
+        } catch (Throwable) {
+            return null;
+        }
     }
 
     /**

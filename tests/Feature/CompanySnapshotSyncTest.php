@@ -1,6 +1,7 @@
 <?php
 
 use App\Jobs\SyncCompanySnapshotMeta;
+use App\Jobs\SyncCompanySnapshotTransactions;
 use App\Models\CompanySnapshot;
 use App\Services\CompanySnapshots\CompanySnapshotDatabaseManager;
 use App\Services\CompanySnapshots\CompanySnapshotSummaryCompiler;
@@ -183,6 +184,151 @@ it('syncs transactions into sqlite and compiles central reporting summary', func
         ->and($summary->open_order_total)->toBe('250.00')
         ->and($summary->company_name)->toBe('Acme Industrial')
         ->and($summary->terms)->toBe('Net 30');
+});
+
+it('syncs only recently modified transactions when a transaction cursor exists', function (): void {
+    $queries = [];
+
+    Http::fake(function (Request $request) use (&$queries) {
+        $query = $request->data()['q'] ?? '';
+        $queries[] = $query;
+
+        expect($query)->toContain("lastmodifieddate >= TO_DATE('2026-07-10 11:55:00', 'yyyy-mm-dd hh24:mi:ss')");
+
+        if (str_contains($query, 'FROM transactionline')) {
+            return Http::response([
+                'items' => [
+                    [
+                        'transaction_id' => '9002',
+                        'line_id' => '1',
+                        'item' => '789',
+                        'item_name' => 'Bracket',
+                        'quantity' => '1',
+                        'rate' => '250',
+                        'amount' => '250',
+                        'memo' => 'Updated order line',
+                    ],
+                ],
+                'hasMore' => false,
+            ]);
+        }
+
+        return Http::response([
+            'items' => [
+                [
+                    'id' => '9002',
+                    'tranid' => 'SO1001',
+                    'otherrefnum' => 'PO-1001',
+                    'type' => 'SalesOrd',
+                    'trandate' => '2026-07-10',
+                    'status' => 'B',
+                    'memo' => 'Updated order',
+                    'total' => '250.00',
+                    'foreigntotal' => '250.00',
+                    'currency' => 'USD',
+                    'lastmodifieddate' => '2026-07-10 12:10:00',
+                ],
+            ],
+            'hasMore' => false,
+        ]);
+    });
+
+    $syncer = app(CompanySnapshotSyncer::class);
+    $snapshot = $syncer->ensureSnapshot(286);
+    $connection = app(CompanySnapshotDatabaseManager::class)->connection($snapshot);
+
+    $connection->table('transactions')->insert([
+        'netsuite_id' => 9001,
+        'tranid' => 'SO1000',
+        'other_ref_num' => 'PO-1000',
+        'type' => 'SalesOrd',
+        'status' => 'G',
+        'trandate' => '2026-07-09',
+        'total' => '150.00',
+        'foreign_total' => '150.00',
+        'currency' => 'USD',
+        'memo' => 'Existing order',
+        'last_modified_at' => '2026-07-10 12:00:00',
+        'raw_payload' => '{}',
+        'synced_at' => now(),
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
+
+    $connection->table('sync_state')->insert([
+        'scope' => 'transactions',
+        'cursor_value' => '2026-07-10 12:00:00',
+        'synced_at' => now(),
+        'payload' => '{}',
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
+
+    $syncer->syncTransactions($snapshot);
+
+    $payload = json_decode((string) $connection->table('sync_state')->where('scope', 'transactions')->value('payload'), true);
+
+    expect($queries)->toHaveCount(2)
+        ->and($connection->table('transactions')->count())->toBe(2)
+        ->and($connection->table('transactions')->where('netsuite_id', 9002)->value('memo'))->toBe('Updated order')
+        ->and($connection->table('transaction_lines')->count())->toBe(1)
+        ->and($connection->table('sync_state')->where('scope', 'transactions')->value('cursor_value'))->toBe('2026-07-10 12:10:00')
+        ->and($payload['mode'])->toBe('incremental')
+        ->and($payload['modified_since'])->toBe('2026-07-10 11:55:00');
+});
+
+it('can force a full transaction sync even when a transaction cursor exists', function (): void {
+    $queries = [];
+
+    Http::fake(function (Request $request) use (&$queries) {
+        $query = $request->data()['q'] ?? '';
+        $queries[] = $query;
+
+        expect($query)->not->toContain('TO_DATE');
+
+        return Http::response([
+            'items' => [],
+            'hasMore' => false,
+        ]);
+    });
+
+    $syncer = app(CompanySnapshotSyncer::class);
+    $snapshot = $syncer->ensureSnapshot(286);
+    $connection = app(CompanySnapshotDatabaseManager::class)->connection($snapshot);
+
+    $connection->table('sync_state')->insert([
+        'scope' => 'transactions',
+        'cursor_value' => '2026-07-10 12:00:00',
+        'synced_at' => now(),
+        'payload' => '{}',
+        'created_at' => now(),
+        'updated_at' => now(),
+    ]);
+
+    $syncer->syncTransactions($snapshot, full: true);
+
+    $payload = json_decode((string) $connection->table('sync_state')->where('scope', 'transactions')->value('payload'), true);
+
+    expect($queries)->toHaveCount(2)
+        ->and($payload['mode'])->toBe('full')
+        ->and($payload['modified_since'])->toBeNull();
+});
+
+it('dispatches full transaction refresh jobs for weekly reconciliation', function (): void {
+    Queue::fake();
+
+    CompanySnapshot::factory()->create([
+        'netsuite_company_id' => 286,
+        'status' => CompanySnapshot::STATUS_ACTIVE,
+        'transactions_synced_at' => now(),
+    ]);
+
+    Artisan::call('company-snapshots:refresh-full-transactions', ['--limit' => 10]);
+
+    Queue::assertPushed(
+        SyncCompanySnapshotTransactions::class,
+        fn (SyncCompanySnapshotTransactions $job): bool => $job->full === true,
+    );
 });
 
 it('dispatches stale snapshot refresh jobs in bounded batches', function (): void {

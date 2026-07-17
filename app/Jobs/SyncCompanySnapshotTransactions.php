@@ -17,6 +17,7 @@ class SyncCompanySnapshotTransactions implements ShouldQueue
 
     public function __construct(
         public int $companySnapshotId,
+        public bool $full = false,
     ) {}
 
     /**
@@ -43,7 +44,7 @@ class SyncCompanySnapshotTransactions implements ShouldQueue
     {
         $snapshot = CompanySnapshot::query()->findOrFail($this->companySnapshotId);
 
-        $syncer->syncTransactions($snapshot);
+        $syncer->syncTransactions($snapshot, full: $this->full);
 
         RefreshCompanySnapshotSummary::dispatch($snapshot->id);
     }

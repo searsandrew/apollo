@@ -2,7 +2,9 @@
 
 namespace App\Services\NetSuite;
 
+use Illuminate\Support\Carbon;
 use Searsandrew\BriarRose\BriarRoseManager;
+use Throwable;
 
 class NetSuiteCompanySnapshotRepository
 {
@@ -66,8 +68,10 @@ class NetSuiteCompanySnapshotRepository
     /**
      * @return array{items: array<int, array<string, mixed>>, has_more: bool}
      */
-    public function fetchTransactionPage(int $netsuiteCompanyId, int $limit = 1000, int $offset = 0): array
+    public function fetchTransactionPage(int $netsuiteCompanyId, int $limit = 1000, int $offset = 0, ?string $modifiedSince = null): array
     {
+        $modifiedSinceClause = $this->modifiedSinceClause('lastmodifieddate', $modifiedSince);
+
         $sql = <<<SQL
             SELECT
                 id,
@@ -83,6 +87,7 @@ class NetSuiteCompanySnapshotRepository
                 lastmodifieddate
             FROM transaction
             WHERE entity = {$netsuiteCompanyId}
+            {$modifiedSinceClause}
             ORDER BY trandate DESC, id DESC
         SQL;
 
@@ -109,7 +114,7 @@ class NetSuiteCompanySnapshotRepository
                 'total' => $this->decimalString($transaction['total'] ?? null),
                 'foreign_total' => $this->decimalString($transaction['foreigntotal'] ?? null),
                 'currency' => $this->nullableString($transaction['currency'] ?? null),
-                'last_modified_at' => $this->nullableString($transaction['lastmodifieddate'] ?? null),
+                'last_modified_at' => $this->nullableDateTimeString($transaction['lastmodifieddate'] ?? null),
                 'raw_payload' => $transaction,
             ];
         }
@@ -123,8 +128,10 @@ class NetSuiteCompanySnapshotRepository
     /**
      * @return array{items: array<int, array<string, mixed>>, has_more: bool}
      */
-    public function fetchTransactionLinePage(int $netsuiteCompanyId, int $limit = 1000, int $offset = 0): array
+    public function fetchTransactionLinePage(int $netsuiteCompanyId, int $limit = 1000, int $offset = 0, ?string $transactionModifiedSince = null): array
     {
+        $modifiedSinceClause = $this->modifiedSinceClause('transaction.lastmodifieddate', $transactionModifiedSince);
+
         $sql = <<<SQL
             SELECT
                 transactionline.transaction AS transaction_id,
@@ -139,6 +146,7 @@ class NetSuiteCompanySnapshotRepository
             LEFT JOIN item ON item.id = transactionline.item
             JOIN transaction ON transaction.id = transactionline.transaction
             WHERE transaction.entity = {$netsuiteCompanyId}
+            {$modifiedSinceClause}
             ORDER BY transaction.trandate DESC, transaction.id DESC, transactionline.id
         SQL;
 
@@ -184,6 +192,30 @@ class NetSuiteCompanySnapshotRepository
         }
 
         return (string) $value;
+    }
+
+    private function nullableDateTimeString(mixed $value): ?string
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+
+        try {
+            return Carbon::parse((string) $value)->format('Y-m-d H:i:s');
+        } catch (Throwable) {
+            return (string) $value;
+        }
+    }
+
+    private function modifiedSinceClause(string $field, ?string $modifiedSince): string
+    {
+        if ($modifiedSince === null || $modifiedSince === '') {
+            return '';
+        }
+
+        $modifiedSince = Carbon::parse($modifiedSince)->format('Y-m-d H:i:s');
+
+        return "AND {$field} >= TO_DATE('{$modifiedSince}', 'yyyy-mm-dd hh24:mi:ss')";
     }
 
     private function nullableInt(mixed $value): ?int
