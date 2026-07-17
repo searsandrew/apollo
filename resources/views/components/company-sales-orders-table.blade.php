@@ -177,74 +177,10 @@ new class extends Component {
                     wire:key="sales-orders-synced-at-{{ $transactionsSyncedAt->getTimestamp() }}"
                     class="italic text-zinc-600 dark:text-zinc-400"
                     aria-live="polite"
-                    x-data="{
-                        syncedAt: new Date(@js($transactionsSyncedAt->toIso8601String())),
-                        label: @js($transactionsSyncedAt->diffForHumans()),
-                        timer: null,
-                        init() {
-                            this.update()
-                            this.schedule()
-                        },
-                        destroy() {
-                            clearTimeout(this.timer)
-                        },
-                        elapsedSeconds() {
-                            return Math.max(0, Math.floor((Date.now() - this.syncedAt.getTime()) / 1000))
-                        },
-                        schedule() {
-                            clearTimeout(this.timer)
-
-                            this.timer = setTimeout(() => {
-                                this.update()
-                                this.schedule()
-                            }, this.elapsedSeconds() < 60 ? 10000 : 60000)
-                        },
-                        update() {
-                            const seconds = this.elapsedSeconds()
-
-                            if (seconds < 5) {
-                                this.label = 'just now'
-                                return
-                            }
-
-                            if (seconds < 60) {
-                                this.label = `${seconds} seconds ago`
-                                return
-                            }
-
-                            const minutes = Math.floor(seconds / 60)
-
-                            if (minutes < 60) {
-                                this.label = `${minutes} ${minutes === 1 ? 'minute' : 'minutes'} ago`
-                                return
-                            }
-
-                            const hours = Math.floor(minutes / 60)
-
-                            if (hours < 24) {
-                                this.label = `${hours} ${hours === 1 ? 'hour' : 'hours'} ago`
-                                return
-                            }
-
-                            const days = Math.floor(hours / 24)
-
-                            if (days < 30) {
-                                this.label = `${days} ${days === 1 ? 'day' : 'days'} ago`
-                                return
-                            }
-
-                            const months = Math.floor(days / 30)
-
-                            if (months < 12) {
-                                this.label = `${months} ${months === 1 ? 'month' : 'months'} ago`
-                                return
-                            }
-
-                            const years = Math.floor(days / 365)
-
-                            this.label = `${years} ${years === 1 ? 'year' : 'years'} ago`
-                        },
-                    }"
+                    x-data="relativeTime({
+                        timestamp: @js($transactionsSyncedAt->toIso8601String()),
+                        fallback: @js($transactionsSyncedAt->diffForHumans()),
+                    })"
                 >
                     {{ __('Last synced') }} <span x-text="label">{{ $transactionsSyncedAt->diffForHumans() }}</span>
                 </small>

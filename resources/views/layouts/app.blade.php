@@ -133,5 +133,6 @@
         @endpersist
 
         @fluxScripts
+        @livewireScriptConfig
     </body>
 </html>

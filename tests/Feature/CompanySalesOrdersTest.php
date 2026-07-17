@@ -221,10 +221,10 @@ it('renders the last synced timestamp as a client-side relative timer', function
     Livewire::test('components::company-sales-orders-table', ['snapshotId' => $snapshot->id])
         ->assertSee('Last synced')
         ->assertSee("sales-orders-synced-at-{$syncedAt->getTimestamp()}", false)
-        ->assertSee('x-data', false)
-        ->assertSee('setTimeout', false)
-        ->assertSee('10000', false)
-        ->assertSee('60000', false)
+        ->assertSee('x-data="relativeTime', false)
+        ->assertSee($syncedAt->toIso8601String(), false)
+        ->assertDontSee('setTimeout', false)
+        ->assertDontSee('elapsedSeconds', false)
         ->assertDontSee('wire:poll.visible.5s', false);
 });
 
