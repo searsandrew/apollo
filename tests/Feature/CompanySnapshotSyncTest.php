@@ -41,6 +41,7 @@ it('creates a dynamic sqlite snapshot database for a company', function (): void
         ->and(Schema::connection($snapshot->connection_name)->hasTable('transactions'))->toBeTrue()
         ->and(Schema::connection($snapshot->connection_name)->hasColumn('transactions', 'other_ref_num'))->toBeTrue()
         ->and(Schema::connection($snapshot->connection_name)->hasTable('transaction_lines'))->toBeTrue()
+        ->and(Schema::connection($snapshot->connection_name)->hasTable('transaction_links'))->toBeTrue()
         ->and(Schema::connection($snapshot->connection_name)->hasTable('sync_state'))->toBeTrue();
 });
 
@@ -101,6 +102,27 @@ it('syncs transactions into sqlite and compiles central reporting summary', func
                         'salesrep' => '1439',
                         'datecreated' => null,
                         'lastmodifieddate' => null,
+                    ],
+                ],
+                'hasMore' => false,
+            ]);
+        }
+
+        if (str_contains($query, 'FROM nextTransactionLineLink')) {
+            return Http::response([
+                'items' => [
+                    [
+                        'previous_doc' => '9002',
+                        'previous_line' => '1',
+                        'next_doc' => '9001',
+                        'next_line' => '1',
+                        'link_type' => 'OrdBill',
+                        'previous_type' => 'SalesOrd',
+                        'previous_tranid' => 'SO1001',
+                        'previous_lastmodifieddate' => now()->toDateTimeString(),
+                        'next_type' => 'CustInvc',
+                        'next_tranid' => 'INV1001',
+                        'next_lastmodifieddate' => now()->toDateTimeString(),
                     ],
                 ],
                 'hasMore' => false,
@@ -178,7 +200,9 @@ it('syncs transactions into sqlite and compiles central reporting summary', func
 
     expect($connection->table('transactions')->count())->toBe(2)
         ->and($connection->table('transaction_lines')->count())->toBe(2)
+        ->and($connection->table('transaction_links')->count())->toBe(1)
         ->and($connection->table('transactions')->where('tranid', 'SO1001')->value('other_ref_num'))->toBe('PO-1001')
+        ->and($connection->table('transaction_links')->where('previous_transaction_netsuite_id', 9002)->where('next_transaction_netsuite_id', 9001)->value('link_type'))->toBe('OrdBill')
         ->and($summary->transaction_count)->toBe(2)
         ->and($summary->invoice_total)->toBe('1250.50')
         ->and($summary->open_order_total)->toBe('250.00')
@@ -194,6 +218,27 @@ it('syncs only recently modified transactions when a transaction cursor exists',
         $queries[] = $query;
 
         expect($query)->toContain("lastmodifieddate >= TO_DATE('2026-07-10 11:55:00', 'yyyy-mm-dd hh24:mi:ss')");
+
+        if (str_contains($query, 'FROM nextTransactionLineLink')) {
+            return Http::response([
+                'items' => [
+                    [
+                        'previous_doc' => '9002',
+                        'previous_line' => '1',
+                        'next_doc' => '9003',
+                        'next_line' => '1',
+                        'link_type' => 'OrdBill',
+                        'previous_type' => 'SalesOrd',
+                        'previous_tranid' => 'SO1001',
+                        'previous_lastmodifieddate' => '2026-07-10 12:10:00',
+                        'next_type' => 'CustInvc',
+                        'next_tranid' => 'INV1002',
+                        'next_lastmodifieddate' => '2026-07-10 12:10:00',
+                    ],
+                ],
+                'hasMore' => false,
+            ]);
+        }
 
         if (str_contains($query, 'FROM transactionline')) {
             return Http::response([
@@ -268,10 +313,11 @@ it('syncs only recently modified transactions when a transaction cursor exists',
 
     $payload = json_decode((string) $connection->table('sync_state')->where('scope', 'transactions')->value('payload'), true);
 
-    expect($queries)->toHaveCount(2)
+    expect($queries)->toHaveCount(3)
         ->and($connection->table('transactions')->count())->toBe(2)
         ->and($connection->table('transactions')->where('netsuite_id', 9002)->value('memo'))->toBe('Updated order')
         ->and($connection->table('transaction_lines')->count())->toBe(1)
+        ->and($connection->table('transaction_links')->count())->toBe(1)
         ->and($connection->table('sync_state')->where('scope', 'transactions')->value('cursor_value'))->toBe('2026-07-10 12:10:00')
         ->and($payload['mode'])->toBe('incremental')
         ->and($payload['modified_since'])->toBe('2026-07-10 11:55:00');
@@ -309,7 +355,7 @@ it('can force a full transaction sync even when a transaction cursor exists', fu
 
     $payload = json_decode((string) $connection->table('sync_state')->where('scope', 'transactions')->value('payload'), true);
 
-    expect($queries)->toHaveCount(2)
+    expect($queries)->toHaveCount(3)
         ->and($payload['mode'])->toBe('full')
         ->and($payload['modified_since'])->toBeNull();
 });

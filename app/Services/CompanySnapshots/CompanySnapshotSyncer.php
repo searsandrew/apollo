@@ -127,12 +127,14 @@ class CompanySnapshotSyncer
 
             $transactionOffset = 0;
             $transactionLineOffset = 0;
+            $transactionLinkOffset = 0;
             $limit = 1000;
             $previousCursor = $this->transactionCursor($snapshot);
             $modifiedSince = $full ? null : $this->incrementalModifiedSince($previousCursor);
             $syncMode = $modifiedSince === null ? 'full' : 'incremental';
             $transactionCount = 0;
             $transactionLineCount = 0;
+            $transactionLinkCount = 0;
 
             do {
                 $page = $this->netSuite->fetchTransactionPage($snapshot->netsuite_company_id, $limit, $transactionOffset, $modifiedSince);
@@ -150,6 +152,13 @@ class CompanySnapshotSyncer
                 } while ($page['has_more']);
             }
 
+            do {
+                $page = $this->netSuite->fetchTransactionLinkPage($snapshot->netsuite_company_id, $limit, $transactionLinkOffset, $modifiedSince);
+                $this->writeTransactionLinks($snapshot, $page['items']);
+                $transactionLinkCount += count($page['items']);
+                $transactionLinkOffset += $limit;
+            } while ($page['has_more']);
+
             $currentCursor = $this->latestTransactionLastModifiedAt($snapshot) ?? $previousCursor;
 
             $this->writeSyncState($snapshot, 'transactions', [
@@ -166,6 +175,14 @@ class CompanySnapshotSyncer
                 'transaction_modified_since' => $modifiedSince,
                 'fetched_count' => $transactionLineCount,
                 'last_offset' => $transactionLineOffset,
+            ], $currentCursor);
+
+            $this->writeSyncState($snapshot, 'transaction_links', [
+                'mode' => $syncMode,
+                'transaction_cursor' => $currentCursor,
+                'transaction_modified_since' => $modifiedSince,
+                'fetched_count' => $transactionLinkCount,
+                'last_offset' => $transactionLinkOffset,
             ], $currentCursor);
 
             $snapshot->forceFill([
@@ -202,6 +219,7 @@ class CompanySnapshotSyncer
                 'meta' => $this->readMeta($snapshot),
                 'transaction_count' => $connection->table('transactions')->count(),
                 'transaction_line_count' => $connection->table('transaction_lines')->count(),
+                'transaction_link_count' => $connection->table('transaction_links')->count(),
                 'recent_transactions' => $connection->table('transactions')
                     ->orderByDesc('trandate')
                     ->orderByDesc('netsuite_id')
@@ -269,6 +287,58 @@ class CompanySnapshotSyncer
             $rows,
             ['netsuite_id'],
             ['tranid', 'other_ref_num', 'type', 'status', 'trandate', 'total', 'foreign_total', 'currency', 'memo', 'last_modified_at', 'raw_payload', 'synced_at', 'updated_at'],
+        );
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $transactionLinks
+     */
+    private function writeTransactionLinks(CompanySnapshot $snapshot, array $transactionLinks): void
+    {
+        if ($transactionLinks === []) {
+            return;
+        }
+
+        $now = now();
+        $connection = $this->databaseManager->connection($snapshot);
+
+        $rows = collect($transactionLinks)->map(function (array $link) use ($now): array {
+            $previousLineId = $link['previous_line_id'] ?? null;
+            $nextLineId = $link['next_line_id'] ?? null;
+            $linkType = $link['link_type'] ?? null;
+            $previousLineKey = $previousLineId === null || $previousLineId === '' ? 'main' : $previousLineId;
+            $nextLineKey = $nextLineId === null || $nextLineId === '' ? 'main' : $nextLineId;
+
+            return [
+                'link_key' => implode(':', [
+                    $link['previous_transaction_netsuite_id'],
+                    $previousLineKey,
+                    $link['next_transaction_netsuite_id'],
+                    $nextLineKey,
+                    $linkType === null || $linkType === '' ? 'linked' : $linkType,
+                ]),
+                'previous_transaction_netsuite_id' => $link['previous_transaction_netsuite_id'],
+                'previous_line_id' => $previousLineId,
+                'previous_transaction_type' => $link['previous_transaction_type'],
+                'previous_transaction_number' => $link['previous_transaction_number'],
+                'previous_last_modified_at' => $link['previous_last_modified_at'],
+                'next_transaction_netsuite_id' => $link['next_transaction_netsuite_id'],
+                'next_line_id' => $nextLineId,
+                'next_transaction_type' => $link['next_transaction_type'],
+                'next_transaction_number' => $link['next_transaction_number'],
+                'next_last_modified_at' => $link['next_last_modified_at'],
+                'link_type' => $linkType,
+                'raw_payload' => json_encode($link['raw_payload'], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES),
+                'synced_at' => $now,
+                'created_at' => $now,
+                'updated_at' => $now,
+            ];
+        })->all();
+
+        $connection->table('transaction_links')->upsert(
+            $rows,
+            ['link_key'],
+            ['previous_transaction_type', 'previous_transaction_number', 'previous_last_modified_at', 'next_transaction_type', 'next_transaction_number', 'next_last_modified_at', 'link_type', 'raw_payload', 'synced_at', 'updated_at'],
         );
     }
 

@@ -124,6 +124,27 @@ class CompanySnapshotDatabaseManager
             });
         }
 
+        if (! Schema::connection($connection)->hasTable('transaction_links')) {
+            Schema::connection($connection)->create('transaction_links', function ($table): void {
+                $table->id();
+                $table->string('link_key')->unique();
+                $table->unsignedBigInteger('previous_transaction_netsuite_id')->index();
+                $table->string('previous_line_id')->nullable()->index();
+                $table->string('previous_transaction_type')->nullable()->index();
+                $table->string('previous_transaction_number')->nullable();
+                $table->timestamp('previous_last_modified_at')->nullable()->index();
+                $table->unsignedBigInteger('next_transaction_netsuite_id')->index();
+                $table->string('next_line_id')->nullable()->index();
+                $table->string('next_transaction_type')->nullable()->index();
+                $table->string('next_transaction_number')->nullable();
+                $table->timestamp('next_last_modified_at')->nullable()->index();
+                $table->string('link_type')->nullable()->index();
+                $table->text('raw_payload')->nullable();
+                $table->timestamp('synced_at')->nullable()->index();
+                $table->timestamps();
+            });
+        }
+
         if (! Schema::connection($connection)->hasTable('sync_state')) {
             Schema::connection($connection)->create('sync_state', function ($table): void {
                 $table->string('scope')->primary();
