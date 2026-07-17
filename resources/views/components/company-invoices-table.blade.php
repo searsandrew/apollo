@@ -1,7 +1,7 @@
 <?php
 
 use App\Models\CompanySnapshot;
-use App\Services\CompanySnapshots\CompanySnapshotSalesOrderRepository;
+use App\Services\CompanySnapshots\CompanySnapshotInvoiceRepository;
 use App\Services\CompanySnapshots\CompanySnapshotSyncer;
 use App\Services\NetSuite\NetSuiteTransactionStatusMapper;
 use Carbon\CarbonInterface;
@@ -20,22 +20,22 @@ new class extends Component {
 
     public int $snapshotId;
 
-    public string $sortBy = CompanySnapshotSalesOrderRepository::DEFAULT_SORT_BY;
+    public string $sortBy = CompanySnapshotInvoiceRepository::DEFAULT_SORT_BY;
 
-    public string $sortDirection = CompanySnapshotSalesOrderRepository::DEFAULT_SORT_DIRECTION;
+    public string $sortDirection = CompanySnapshotInvoiceRepository::DEFAULT_SORT_DIRECTION;
 
-    private CompanySnapshotSalesOrderRepository $salesOrderRepository;
+    private CompanySnapshotInvoiceRepository $invoiceRepository;
 
     private CompanySnapshotSyncer $snapshotSyncer;
 
     private NetSuiteTransactionStatusMapper $statusMapper;
 
     public function boot(
-        CompanySnapshotSalesOrderRepository $salesOrderRepository,
+        CompanySnapshotInvoiceRepository $invoiceRepository,
         CompanySnapshotSyncer $snapshotSyncer,
         NetSuiteTransactionStatusMapper $statusMapper,
     ): void {
-        $this->salesOrderRepository = $salesOrderRepository;
+        $this->invoiceRepository = $invoiceRepository;
         $this->snapshotSyncer = $snapshotSyncer;
         $this->statusMapper = $statusMapper;
     }
@@ -47,9 +47,9 @@ new class extends Component {
     }
 
     #[Computed]
-    public function salesOrders(): LengthAwarePaginator
+    public function invoices(): LengthAwarePaginator
     {
-        return $this->salesOrderRepository->paginate(
+        return $this->invoiceRepository->paginate(
             snapshot: $this->snapshot,
             sortBy: $this->sortBy,
             sortDirection: $this->sortDirection,
@@ -89,7 +89,7 @@ new class extends Component {
 
     public function refreshSyncState(): void
     {
-        unset($this->snapshot, $this->salesOrders);
+        unset($this->snapshot, $this->invoices);
 
         if (! $this->shouldPoll || $this->isSyncing()) {
             return;
@@ -115,7 +115,7 @@ new class extends Component {
 
     public function sort(string $column): void
     {
-        if (! $this->salesOrderRepository->isSortable($column)) {
+        if (! $this->invoiceRepository->isSortable($column)) {
             return;
         }
 
@@ -123,10 +123,20 @@ new class extends Component {
             $this->sortDirection = $this->sortDirection === 'asc' ? 'desc' : 'asc';
         } else {
             $this->sortBy = $column;
-            $this->sortDirection = $this->salesOrderRepository->defaultDirectionFor($column);
+            $this->sortDirection = $this->invoiceRepository->defaultDirectionFor($column);
         }
 
-        $this->resetPage(pageName: CompanySnapshotSalesOrderRepository::PAGE_NAME);
+        $this->resetPage(pageName: CompanySnapshotInvoiceRepository::PAGE_NAME);
+    }
+
+    public function transactionTypeLabel(?string $type): string
+    {
+        return $this->statusMapper->typeLabel($type);
+    }
+
+    public function transactionTypeColor(?string $type): string
+    {
+        return $this->statusMapper->typeColor($type);
     }
 
     public function transactionStatusLabel(?string $type, ?string $status): string
@@ -164,8 +174,8 @@ new class extends Component {
 <div @if ($this->shouldPoll) wire:poll.visible.5s="refreshSyncState" @endif>
     <div class="mb-3 flex w-full flex-row items-center justify-between gap-4">
         <div class="flex flex-col">
-            <flux:heading size="lg">{{ __('Sales Orders') }}</flux:heading>
-            <flux:text>{{ __('Orders currently submitted and processed by :company.', ['company' => config('app.name')]) }}</flux:text>
+            <flux:heading size="lg">{{ __('Invoices') }}</flux:heading>
+            <flux:text>{{ __('Invoices and credits currently processed by :company.', ['company' => config('app.name')]) }}</flux:text>
         </div>
 
         <div class="flex shrink-0 flex-col items-end gap-1">
@@ -183,7 +193,7 @@ new class extends Component {
 
             @if ($transactionsSyncedAt !== null)
                 <small
-                    wire:key="sales-orders-synced-at-{{ $transactionsSyncedAt->getTimestamp() }}"
+                    wire:key="invoices-synced-at-{{ $transactionsSyncedAt->getTimestamp() }}"
                     class="italic text-zinc-600 dark:text-zinc-400"
                     aria-live="polite"
                     x-data="relativeTime({
@@ -199,7 +209,7 @@ new class extends Component {
         </div>
     </div>
 
-    @if ($this->salesOrders->count() === 0)
+    @if ($this->invoices->count() === 0)
         @if ($this->shouldPoll)
             @php($syncStartedAt = $this->syncStartedAt())
 
@@ -210,8 +220,8 @@ new class extends Component {
                     </div>
 
                     <div class="min-w-0">
-                        <flux:heading size="sm">{{ __('Sales orders are syncing') }}</flux:heading>
-                        <flux:text>{{ __('We are checking our servers. This page will update automatically as soon as sales orders are available.') }}</flux:text>
+                        <flux:heading size="sm">{{ __('Invoices are syncing') }}</flux:heading>
+                        <flux:text>{{ __('We are checking our servers. This page will update automatically as soon as invoices are available.') }}</flux:text>
 
                         <div class="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-zinc-600 dark:text-zinc-400" aria-live="polite">
                             <span wire:loading.remove>{{ __('Waiting for next check') }}</span>
@@ -234,57 +244,57 @@ new class extends Component {
             </div>
         @else
             <div class="rounded-lg border border-dashed border-zinc-200 p-6 dark:border-zinc-700">
-                <flux:heading size="sm">{{ __('No sales orders found') }}</flux:heading>
-                <flux:text>{{ __('No sales orders were found in the company data source.') }}</flux:text>
+                <flux:heading size="sm">{{ __('No invoices found') }}</flux:heading>
+                <flux:text>{{ __('No invoices or credits were found in the company data source.') }}</flux:text>
             </div>
         @endif
     @else
-        <flux:table class="w-full" :paginate="$this->salesOrders">
+        <flux:table class="w-full" :paginate="$this->invoices">
             <flux:table.columns sticky class="bg-white dark:bg-zinc-900">
-                <flux:table.column sortable class="w-36" :sorted="$sortBy === 'sales_order_number'" :direction="$sortDirection" wire:click="sort('sales_order_number')">{{ __('Sales Order') }}</flux:table.column>
-                <flux:table.column sortable class="w-56" :sorted="$sortBy === 'po_number'" :direction="$sortDirection" wire:click="sort('po_number')">{{ __('PO Number') }}</flux:table.column>
+                <flux:table.column sortable class="w-40" :sorted="$sortBy === 'invoice_number'" :direction="$sortDirection" wire:click="sort('invoice_number')">{{ __('Invoice/Credit #') }}</flux:table.column>
+                <flux:table.column sortable class="w-52" :sorted="$sortBy === 'po_number'" :direction="$sortDirection" wire:click="sort('po_number')">{{ __('PO Number') }}</flux:table.column>
                 <flux:table.column sortable class="w-32" :sorted="$sortBy === 'date'" :direction="$sortDirection" wire:click="sort('date')">{{ __('Date') }}</flux:table.column>
-                <flux:table.column sortable align="center" class="w-44" :sorted="$sortBy === 'status'" :direction="$sortDirection" wire:click="sort('status')">{{ __('Status') }}</flux:table.column>
+                <flux:table.column sortable align="center" class="w-32" :sorted="$sortBy === 'type'" :direction="$sortDirection" wire:click="sort('type')">{{ __('Type') }}</flux:table.column>
+                <flux:table.column sortable align="center" class="w-40" :sorted="$sortBy === 'status'" :direction="$sortDirection" wire:click="sort('status')">{{ __('Status') }}</flux:table.column>
                 <flux:table.column sortable class="w-28" :sorted="$sortBy === 'total'" :direction="$sortDirection" wire:click="sort('total')">{{ __('Total') }}</flux:table.column>
                 <flux:table.column align="end" class="w-12"></flux:table.column>
             </flux:table.columns>
 
             <flux:table.rows>
-                @foreach ($this->salesOrders as $salesOrder)
-                    @php($salesOrderNumber = $salesOrder->tranid ?: $salesOrder->netsuite_id)
-                    @php($poNumber = $salesOrder->other_ref_num ?: '-')
-                    @php($statusLabel = $this->transactionStatusLabel($salesOrder->type, $salesOrder->status))
+                @foreach ($this->invoices as $invoice)
+                    @php($invoiceNumber = $invoice->tranid ?: $invoice->netsuite_id)
+                    @php($poNumber = $invoice->other_ref_num ?: '-')
+                    @php($typeLabel = $this->transactionTypeLabel($invoice->type))
+                    @php($statusLabel = $this->transactionStatusLabel($invoice->type, $invoice->status))
 
-                    <flux:table.row wire:key="sales-order-{{ $salesOrder->netsuite_id }}">
-                        <flux:table.cell class="w-36 font-medium">
-                            <span class="block truncate" title="{{ $salesOrderNumber }}">{{ $salesOrderNumber }}</span>
+                    <flux:table.row wire:key="invoice-{{ $invoice->netsuite_id }}">
+                        <flux:table.cell class="w-40 font-medium">
+                            <span class="block truncate" title="{{ $invoiceNumber }}">{{ $invoiceNumber }}</span>
                         </flux:table.cell>
-                        <flux:table.cell class="w-56">
+                        <flux:table.cell class="w-52">
                             <span class="block truncate" title="{{ $poNumber }}">{{ $poNumber }}</span>
                         </flux:table.cell>
-                        <flux:table.cell>{{ blank($salesOrder->trandate) ? '-' : Carbon::parse((string) $salesOrder->trandate)->toFormattedDateString() }}</flux:table.cell>
-                        <flux:table.cell align="center" class="w-44">
-                            <flux:badge size="sm" class="max-w-40" :color="$this->transactionStatusColor($salesOrder->type, $salesOrder->status)" inset="top bottom" title="{{ $statusLabel }}">
+                        <flux:table.cell>{{ blank($invoice->trandate) ? '-' : Carbon::parse((string) $invoice->trandate)->toFormattedDateString() }}</flux:table.cell>
+                        <flux:table.cell align="center" class="w-32">
+                            <flux:badge size="sm" class="max-w-28" :color="$this->transactionTypeColor($invoice->type)" inset="top bottom" title="{{ $typeLabel }}">
+                                <span class="block truncate">{{ $typeLabel }}</span>
+                            </flux:badge>
+                        </flux:table.cell>
+                        <flux:table.cell align="center" class="w-40">
+                            <flux:badge size="sm" class="max-w-36" :color="$this->transactionStatusColor($invoice->type, $invoice->status)" inset="top bottom" title="{{ $statusLabel }}">
                                 <span class="block truncate">{{ $statusLabel }}</span>
                             </flux:badge>
                         </flux:table.cell>
-                        <flux:table.cell>{{ Number::currency((float) $salesOrder->total, in: $this->currencyCode($salesOrder->currency)) }}</flux:table.cell>
+                        <flux:table.cell>{{ Number::currency((float) $invoice->total, in: $this->currencyCode($invoice->currency)) }}</flux:table.cell>
                         <flux:table.cell align="end" class="w-12 py-0">
                             <flux:dropdown align="end">
-                                <flux:button variant="ghost" size="sm" icon="ellipsis-horizontal" aria-label="{{ __('Order actions') }}"></flux:button>
+                                <flux:button variant="ghost" size="sm" icon="ellipsis-horizontal" aria-label="{{ __('Billing document actions') }}"></flux:button>
                                 <flux:menu>
-                                    @can('create order')
-                                        <flux:menu.item icon="document-text">{{ __('View Purchase Order') }}</flux:menu.item>
+                                    @can('view invoice')
+                                        <flux:menu.item icon="document-currency-dollar">{{ $invoice->type === 'CustCred' ? __('View Credit Memo') : __('View Invoice') }}</flux:menu.item>
                                     @endcan
                                     @can('view order')
                                         <flux:menu.item icon="document-magnifying-glass">{{ __('View Sales Order') }}</flux:menu.item>
-                                    @endcan
-                                    @can('view invoice')
-                                        <flux:menu.item icon="document-currency-dollar">{{ __('View Invoice') }}</flux:menu.item>
-                                    @endcan
-                                    <flux:menu.separator />
-                                    @can('view order')
-                                        <flux:menu.item icon="truck">{{ __('Track Shipment') }}</flux:menu.item>
                                     @endcan
                                     @can('create return')
                                         <flux:menu.item icon="receipt-refund">{{ __('Return Good Authorization') }}</flux:menu.item>
