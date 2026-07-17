@@ -77,6 +77,16 @@ class CompanySnapshotTransactionRelationshipRepository
         );
     }
 
+    public function salesOrdersForTransaction(CompanySnapshot $snapshot, int $netsuiteTransactionId): Collection
+    {
+        return $this->relatedTransactions(
+            snapshot: $snapshot,
+            netsuiteTransactionId: $netsuiteTransactionId,
+            types: ['SalesOrd'],
+            maxDepth: 2,
+        );
+    }
+
     /**
      * @return array<int, int>
      */

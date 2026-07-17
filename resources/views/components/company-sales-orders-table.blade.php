@@ -3,6 +3,7 @@
 use App\Models\CompanySnapshot;
 use App\Services\CompanySnapshots\CompanySnapshotSalesOrderRepository;
 use App\Services\CompanySnapshots\CompanySnapshotSyncer;
+use App\Services\CompanySnapshots\CompanySnapshotTransactionRelationshipRepository;
 use App\Services\NetSuite\NetSuiteTransactionStatusMapper;
 use Carbon\CarbonInterface;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
@@ -24,7 +25,15 @@ new class extends Component {
 
     public string $sortDirection = CompanySnapshotSalesOrderRepository::DEFAULT_SORT_DIRECTION;
 
+    public string $search = '';
+
+    public string $related = '';
+
+    public string $source = '';
+
     private CompanySnapshotSalesOrderRepository $salesOrderRepository;
+
+    private CompanySnapshotTransactionRelationshipRepository $relationshipRepository;
 
     private CompanySnapshotSyncer $snapshotSyncer;
 
@@ -32,12 +41,26 @@ new class extends Component {
 
     public function boot(
         CompanySnapshotSalesOrderRepository $salesOrderRepository,
+        CompanySnapshotTransactionRelationshipRepository $relationshipRepository,
         CompanySnapshotSyncer $snapshotSyncer,
         NetSuiteTransactionStatusMapper $statusMapper,
     ): void {
         $this->salesOrderRepository = $salesOrderRepository;
+        $this->relationshipRepository = $relationshipRepository;
         $this->snapshotSyncer = $snapshotSyncer;
         $this->statusMapper = $statusMapper;
+    }
+
+    /**
+     * @return array<string, array<string, string>>
+     */
+    protected function queryString(): array
+    {
+        return [
+            'search' => ['as' => 'q', 'except' => ''],
+            'related' => ['except' => ''],
+            'source' => ['except' => ''],
+        ];
     }
 
     #[Computed]
@@ -53,6 +76,8 @@ new class extends Component {
             snapshot: $this->snapshot,
             sortBy: $this->sortBy,
             sortDirection: $this->sortDirection,
+            search: $this->search,
+            netsuiteIds: $this->relatedIds(),
         );
     }
 
@@ -129,6 +154,60 @@ new class extends Component {
         $this->resetPage(pageName: CompanySnapshotSalesOrderRepository::PAGE_NAME);
     }
 
+    public function updatedSearch(): void
+    {
+        unset($this->salesOrders);
+
+        $this->resetPage(pageName: CompanySnapshotSalesOrderRepository::PAGE_NAME);
+    }
+
+    public function updatedRelated(): void
+    {
+        unset($this->salesOrders);
+
+        $this->resetPage(pageName: CompanySnapshotSalesOrderRepository::PAGE_NAME);
+    }
+
+    public function clearFilters(): void
+    {
+        $this->search = '';
+        $this->related = '';
+        $this->source = '';
+
+        unset($this->salesOrders);
+
+        $this->resetPage(pageName: CompanySnapshotSalesOrderRepository::PAGE_NAME);
+    }
+
+    public function hasFilters(): bool
+    {
+        return trim($this->search) !== '' || $this->relatedIds() !== [];
+    }
+
+    /**
+     * @return array<int, int>
+     */
+    public function relatedIds(): array
+    {
+        return collect(explode(',', $this->related))
+            ->map(fn (string $id): string => trim($id))
+            ->filter(fn (string $id): bool => ctype_digit($id))
+            ->map(fn (string $id): int => (int) $id)
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    public function relatedInvoicesUrl(int $salesOrderNetsuiteId, string $salesOrderNumber): ?string
+    {
+        return $this->relatedDocumentsUrl($salesOrderNetsuiteId, $salesOrderNumber, ['CustInvc']);
+    }
+
+    public function relatedCreditMemosUrl(int $salesOrderNetsuiteId, string $salesOrderNumber): ?string
+    {
+        return $this->relatedDocumentsUrl($salesOrderNetsuiteId, $salesOrderNumber, ['CustCred']);
+    }
+
     public function transactionStatusLabel(?string $type, ?string $status): string
     {
         return $this->statusMapper->label($type, $status);
@@ -157,6 +236,29 @@ new class extends Component {
     private function refreshQueueCacheKey(): string
     {
         return 'company-snapshot:refresh-queued:'.$this->snapshotId;
+    }
+
+    /**
+     * @param  array<int, string>  $types
+     */
+    private function relatedDocumentsUrl(int $salesOrderNetsuiteId, string $salesOrderNumber, array $types): ?string
+    {
+        $documents = $this->relationshipRepository->relatedTransactions(
+            snapshot: $this->snapshot,
+            netsuiteTransactionId: $salesOrderNetsuiteId,
+            types: $types,
+            maxDepth: 2,
+        );
+
+        if ($documents->isEmpty()) {
+            return null;
+        }
+
+        return route('company.invoices', [
+            'company' => $this->snapshot->netsuite_company_id,
+            'related' => $documents->pluck('netsuite_id')->implode(','),
+            'source' => $salesOrderNumber,
+        ]);
     }
 };
 ?>
@@ -199,8 +301,22 @@ new class extends Component {
         </div>
     </div>
 
+    <div class="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <flux:input class="sm:max-w-sm" size="sm" icon="magnifying-glass" clearable wire:model.live.debounce.300ms="search" placeholder="{{ __('Search sales order or PO number') }}" />
+
+        @if ($this->hasFilters())
+            <div class="flex flex-wrap items-center gap-2">
+                @if ($this->relatedIds() !== [])
+                    <flux:badge size="sm" color="zinc">{{ __('Related to :source', ['source' => $source ?: __('selected record')]) }}</flux:badge>
+                @endif
+
+                <flux:button size="xs" variant="ghost" icon="x-mark" wire:click="clearFilters">{{ __('Clear filters') }}</flux:button>
+            </div>
+        @endif
+    </div>
+
     @if ($this->salesOrders->count() === 0)
-        @if ($this->shouldPoll)
+        @if ($this->shouldPoll && ! $this->hasFilters())
             @php($syncStartedAt = $this->syncStartedAt())
 
             <div class="rounded-lg border border-dashed border-sky-200 bg-sky-50/40 p-6 dark:border-sky-900/70 dark:bg-sky-950/20">
@@ -234,8 +350,8 @@ new class extends Component {
             </div>
         @else
             <div class="rounded-lg border border-dashed border-zinc-200 p-6 dark:border-zinc-700">
-                <flux:heading size="sm">{{ __('No sales orders found') }}</flux:heading>
-                <flux:text>{{ __('No sales orders were found in the company data source.') }}</flux:text>
+                <flux:heading size="sm">{{ $this->hasFilters() ? __('No matching sales orders found') : __('No sales orders found') }}</flux:heading>
+                <flux:text>{{ $this->hasFilters() ? __('No sales orders matched the current search or relationship filter.') : __('No sales orders were found in the company data source.') }}</flux:text>
             </div>
         @endif
     @else
@@ -254,6 +370,8 @@ new class extends Component {
                     @php($salesOrderNumber = $salesOrder->tranid ?: $salesOrder->netsuite_id)
                     @php($poNumber = $salesOrder->other_ref_num ?: '-')
                     @php($statusLabel = $this->transactionStatusLabel($salesOrder->type, $salesOrder->status))
+                    @php($relatedInvoicesUrl = $this->relatedInvoicesUrl((int) $salesOrder->netsuite_id, (string) $salesOrderNumber))
+                    @php($relatedCreditMemosUrl = $this->relatedCreditMemosUrl((int) $salesOrder->netsuite_id, (string) $salesOrderNumber))
 
                     <flux:table.row wire:key="sales-order-{{ $salesOrder->netsuite_id }}">
                         <flux:table.cell class="w-36 font-medium">
@@ -280,7 +398,12 @@ new class extends Component {
                                         <flux:menu.item icon="document-magnifying-glass">{{ __('View Sales Order') }}</flux:menu.item>
                                     @endcan
                                     @can('view invoice')
-                                        <flux:menu.item icon="document-currency-dollar">{{ __('View Invoice') }}</flux:menu.item>
+                                        @if ($relatedInvoicesUrl !== null)
+                                            <flux:menu.item icon="document-currency-dollar" :href="$relatedInvoicesUrl" wire:navigate>{{ __('View Invoices') }}</flux:menu.item>
+                                        @endif
+                                        @if ($relatedCreditMemosUrl !== null)
+                                            <flux:menu.item icon="receipt-refund" :href="$relatedCreditMemosUrl" wire:navigate>{{ __('View Credit Memos') }}</flux:menu.item>
+                                        @endif
                                     @endcan
                                     <flux:menu.separator />
                                     @can('view order')

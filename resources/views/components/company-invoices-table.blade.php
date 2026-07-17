@@ -3,6 +3,7 @@
 use App\Models\CompanySnapshot;
 use App\Services\CompanySnapshots\CompanySnapshotInvoiceRepository;
 use App\Services\CompanySnapshots\CompanySnapshotSyncer;
+use App\Services\CompanySnapshots\CompanySnapshotTransactionRelationshipRepository;
 use App\Services\NetSuite\NetSuiteTransactionStatusMapper;
 use Carbon\CarbonInterface;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
@@ -24,7 +25,15 @@ new class extends Component {
 
     public string $sortDirection = CompanySnapshotInvoiceRepository::DEFAULT_SORT_DIRECTION;
 
+    public string $search = '';
+
+    public string $related = '';
+
+    public string $source = '';
+
     private CompanySnapshotInvoiceRepository $invoiceRepository;
+
+    private CompanySnapshotTransactionRelationshipRepository $relationshipRepository;
 
     private CompanySnapshotSyncer $snapshotSyncer;
 
@@ -32,12 +41,26 @@ new class extends Component {
 
     public function boot(
         CompanySnapshotInvoiceRepository $invoiceRepository,
+        CompanySnapshotTransactionRelationshipRepository $relationshipRepository,
         CompanySnapshotSyncer $snapshotSyncer,
         NetSuiteTransactionStatusMapper $statusMapper,
     ): void {
         $this->invoiceRepository = $invoiceRepository;
+        $this->relationshipRepository = $relationshipRepository;
         $this->snapshotSyncer = $snapshotSyncer;
         $this->statusMapper = $statusMapper;
+    }
+
+    /**
+     * @return array<string, array<string, string>>
+     */
+    protected function queryString(): array
+    {
+        return [
+            'search' => ['as' => 'q', 'except' => ''],
+            'related' => ['except' => ''],
+            'source' => ['except' => ''],
+        ];
     }
 
     #[Computed]
@@ -53,6 +76,8 @@ new class extends Component {
             snapshot: $this->snapshot,
             sortBy: $this->sortBy,
             sortDirection: $this->sortDirection,
+            search: $this->search,
+            netsuiteIds: $this->relatedIds(),
         );
     }
 
@@ -127,6 +152,65 @@ new class extends Component {
         }
 
         $this->resetPage(pageName: CompanySnapshotInvoiceRepository::PAGE_NAME);
+    }
+
+    public function updatedSearch(): void
+    {
+        unset($this->invoices);
+
+        $this->resetPage(pageName: CompanySnapshotInvoiceRepository::PAGE_NAME);
+    }
+
+    public function updatedRelated(): void
+    {
+        unset($this->invoices);
+
+        $this->resetPage(pageName: CompanySnapshotInvoiceRepository::PAGE_NAME);
+    }
+
+    public function clearFilters(): void
+    {
+        $this->search = '';
+        $this->related = '';
+        $this->source = '';
+
+        unset($this->invoices);
+
+        $this->resetPage(pageName: CompanySnapshotInvoiceRepository::PAGE_NAME);
+    }
+
+    public function hasFilters(): bool
+    {
+        return trim($this->search) !== '' || $this->relatedIds() !== [];
+    }
+
+    /**
+     * @return array<int, int>
+     */
+    public function relatedIds(): array
+    {
+        return collect(explode(',', $this->related))
+            ->map(fn (string $id): string => trim($id))
+            ->filter(fn (string $id): bool => ctype_digit($id))
+            ->map(fn (string $id): int => (int) $id)
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    public function relatedSalesOrdersUrl(int $netsuiteTransactionId, string $documentNumber): ?string
+    {
+        $salesOrders = $this->relationshipRepository->salesOrdersForTransaction($this->snapshot, $netsuiteTransactionId);
+
+        if ($salesOrders->isEmpty()) {
+            return null;
+        }
+
+        return route('company.sales-orders', [
+            'company' => $this->snapshot->netsuite_company_id,
+            'related' => $salesOrders->pluck('netsuite_id')->implode(','),
+            'source' => $documentNumber,
+        ]);
     }
 
     public function transactionTypeLabel(?string $type): string
@@ -209,8 +293,22 @@ new class extends Component {
         </div>
     </div>
 
+    <div class="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <flux:input class="sm:max-w-sm" size="sm" icon="magnifying-glass" clearable wire:model.live.debounce.300ms="search" placeholder="{{ __('Search invoice, credit memo, or PO number') }}" />
+
+        @if ($this->hasFilters())
+            <div class="flex flex-wrap items-center gap-2">
+                @if ($this->relatedIds() !== [])
+                    <flux:badge size="sm" color="zinc">{{ __('Related to :source', ['source' => $source ?: __('selected record')]) }}</flux:badge>
+                @endif
+
+                <flux:button size="xs" variant="ghost" icon="x-mark" wire:click="clearFilters">{{ __('Clear filters') }}</flux:button>
+            </div>
+        @endif
+    </div>
+
     @if ($this->invoices->count() === 0)
-        @if ($this->shouldPoll)
+        @if ($this->shouldPoll && ! $this->hasFilters())
             @php($syncStartedAt = $this->syncStartedAt())
 
             <div class="rounded-lg border border-dashed border-sky-200 bg-sky-50/40 p-6 dark:border-sky-900/70 dark:bg-sky-950/20">
@@ -244,8 +342,8 @@ new class extends Component {
             </div>
         @else
             <div class="rounded-lg border border-dashed border-zinc-200 p-6 dark:border-zinc-700">
-                <flux:heading size="sm">{{ __('No invoices found') }}</flux:heading>
-                <flux:text>{{ __('No invoices or credits were found in the company data source.') }}</flux:text>
+                <flux:heading size="sm">{{ $this->hasFilters() ? __('No matching invoices found') : __('No invoices found') }}</flux:heading>
+                <flux:text>{{ $this->hasFilters() ? __('No invoices or credits matched the current search or relationship filter.') : __('No invoices or credits were found in the company data source.') }}</flux:text>
             </div>
         @endif
     @else
@@ -266,6 +364,7 @@ new class extends Component {
                     @php($poNumber = $invoice->other_ref_num ?: '-')
                     @php($typeLabel = $this->transactionTypeLabel($invoice->type))
                     @php($statusLabel = $this->transactionStatusLabel($invoice->type, $invoice->status))
+                    @php($relatedSalesOrdersUrl = $this->relatedSalesOrdersUrl((int) $invoice->netsuite_id, (string) $invoiceNumber))
 
                     <flux:table.row wire:key="invoice-{{ $invoice->netsuite_id }}">
                         <flux:table.cell class="w-40 font-medium">
@@ -294,7 +393,9 @@ new class extends Component {
                                         <flux:menu.item icon="document-currency-dollar">{{ $invoice->type === 'CustCred' ? __('View Credit Memo') : __('View Invoice') }}</flux:menu.item>
                                     @endcan
                                     @can('view order')
-                                        <flux:menu.item icon="document-magnifying-glass">{{ __('View Sales Order') }}</flux:menu.item>
+                                        @if ($relatedSalesOrdersUrl !== null)
+                                            <flux:menu.item icon="document-magnifying-glass" :href="$relatedSalesOrdersUrl" wire:navigate>{{ __('Show Sales Orders') }}</flux:menu.item>
+                                        @endif
                                     @endcan
                                     @can('create return')
                                         <flux:menu.item icon="receipt-refund">{{ __('Return Good Authorization') }}</flux:menu.item>

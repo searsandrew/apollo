@@ -47,8 +47,11 @@ class CompanySnapshotInvoiceRepository
         array $columns = ['*'],
         string $sortBy = self::DEFAULT_SORT_BY,
         string $sortDirection = self::DEFAULT_SORT_DIRECTION,
+        ?string $search = null,
+        array $netsuiteIds = [],
     ): LengthAwarePaginator {
         return $this->invoiceQuery($snapshot)
+            ->tap(fn (Builder $query): Builder => $this->applyFilters($query, $search, $netsuiteIds))
             ->tap(fn (Builder $query): Builder => $this->applySort($query, $sortBy, $sortDirection))
             ->paginate($perPage, $columns, $pageName);
     }
@@ -77,6 +80,35 @@ class CompanySnapshotInvoiceRepository
             ->connection($snapshot)
             ->table('transactions')
             ->whereIn('type', self::INVOICE_TYPES);
+    }
+
+    /**
+     * @param  array<int, int>  $netsuiteIds
+     */
+    private function applyFilters(Builder $query, ?string $search, array $netsuiteIds): Builder
+    {
+        $netsuiteIds = array_values(array_unique(array_filter($netsuiteIds)));
+
+        if ($netsuiteIds !== []) {
+            $query->whereIn('netsuite_id', $netsuiteIds);
+        }
+
+        $search = trim((string) $search);
+
+        if ($search !== '') {
+            $like = '%'.$search.'%';
+
+            $query->where(function (Builder $query) use ($like, $search): void {
+                $query->where('tranid', 'like', $like)
+                    ->orWhere('other_ref_num', 'like', $like);
+
+                if (ctype_digit($search)) {
+                    $query->orWhere('netsuite_id', (int) $search);
+                }
+            });
+        }
+
+        return $query;
     }
 
     private function applySort(Builder $query, string $sortBy, string $sortDirection): Builder

@@ -3,6 +3,7 @@
 use App\Jobs\SyncCompanySnapshotMeta;
 use App\Jobs\SyncCompanySnapshotTransactions;
 use App\Models\CompanySnapshot;
+use App\Models\User;
 use App\Services\CompanySnapshots\CompanySnapshotDatabaseManager;
 use App\Services\CompanySnapshots\CompanySnapshotSalesOrderRepository;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
@@ -10,6 +11,7 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Queue;
 use Livewire\Livewire;
+use Spatie\Permission\Models\Permission;
 
 beforeEach(function (): void {
     config([
@@ -248,6 +250,217 @@ it('sorts sales orders by the selected sortable column', function (): void {
         ->assertSet('sortBy', 'po_number')
         ->assertSet('sortDirection', 'desc')
         ->assertSeeHtmlInOrder(['PO-1000', 'PO-0999']);
+});
+
+it('searches sales orders by document number or PO number', function (): void {
+    $snapshot = CompanySnapshot::factory()->create([
+        'netsuite_company_id' => 286,
+        'status' => CompanySnapshot::STATUS_ACTIVE,
+        'meta_synced_at' => now(),
+        'transactions_synced_at' => now(),
+        'summary_synced_at' => now(),
+    ]);
+
+    $connection = app(CompanySnapshotDatabaseManager::class)->ensureDatabase($snapshot);
+
+    $connection->table('transactions')->insert([
+        [
+            'netsuite_id' => 9002,
+            'tranid' => 'SO999',
+            'other_ref_num' => 'PO-0999',
+            'type' => 'SalesOrd',
+            'status' => 'B',
+            'trandate' => '2026-01-03',
+            'total' => '250.00',
+            'foreign_total' => '250.00',
+            'currency' => 'USD',
+            'memo' => 'Order',
+            'last_modified_at' => '2026-01-03 16:05:00',
+            'raw_payload' => '{}',
+            'synced_at' => '2026-01-03 16:10:00',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ],
+        [
+            'netsuite_id' => 9003,
+            'tranid' => 'SO1000',
+            'other_ref_num' => 'PO-1000',
+            'type' => 'SalesOrd',
+            'status' => 'G',
+            'trandate' => '2026-01-02',
+            'total' => '150.00',
+            'foreign_total' => '150.00',
+            'currency' => 'USD',
+            'memo' => 'Order',
+            'last_modified_at' => '2026-01-02 16:05:00',
+            'raw_payload' => '{}',
+            'synced_at' => '2026-01-02 16:10:00',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ],
+    ]);
+
+    Livewire::test('components::company-sales-orders-table', ['snapshotId' => $snapshot->id])
+        ->set('search', 'PO-0999')
+        ->assertSee('SO999')
+        ->assertDontSee('SO1000')
+        ->set('search', 'SO1000')
+        ->assertSee('SO1000')
+        ->assertDontSee('SO999');
+});
+
+it('links sales order actions to filtered invoice and credit memo tables', function (): void {
+    Permission::findOrCreate('view invoice');
+
+    $user = User::factory()->create();
+    $user->givePermissionTo('view invoice');
+    $this->actingAs($user);
+
+    $snapshot = CompanySnapshot::factory()->create([
+        'netsuite_company_id' => 286,
+        'status' => CompanySnapshot::STATUS_ACTIVE,
+        'meta_synced_at' => now(),
+        'transactions_synced_at' => now(),
+        'summary_synced_at' => now(),
+    ]);
+
+    $connection = app(CompanySnapshotDatabaseManager::class)->ensureDatabase($snapshot);
+    $now = now();
+
+    $connection->table('transactions')->insert([
+        [
+            'netsuite_id' => 9001,
+            'tranid' => 'SO1001',
+            'other_ref_num' => 'PO-1001',
+            'type' => 'SalesOrd',
+            'status' => 'G',
+            'trandate' => '2026-01-03',
+            'total' => '1250.50',
+            'foreign_total' => '1250.50',
+            'currency' => 'USD',
+            'memo' => 'Sales order',
+            'last_modified_at' => '2026-01-03 12:00:00',
+            'raw_payload' => '{}',
+            'synced_at' => $now,
+            'created_at' => $now,
+            'updated_at' => $now,
+        ],
+        [
+            'netsuite_id' => 8001,
+            'tranid' => 'INV1001',
+            'other_ref_num' => 'PO-1001',
+            'type' => 'CustInvc',
+            'status' => 'B',
+            'trandate' => '2026-01-04',
+            'total' => '625.25',
+            'foreign_total' => '625.25',
+            'currency' => 'USD',
+            'memo' => 'Invoice',
+            'last_modified_at' => '2026-01-04 12:00:00',
+            'raw_payload' => '{}',
+            'synced_at' => $now,
+            'created_at' => $now,
+            'updated_at' => $now,
+        ],
+        [
+            'netsuite_id' => 8002,
+            'tranid' => 'INV1002',
+            'other_ref_num' => 'PO-1001',
+            'type' => 'CustInvc',
+            'status' => 'B',
+            'trandate' => '2026-01-05',
+            'total' => '625.25',
+            'foreign_total' => '625.25',
+            'currency' => 'USD',
+            'memo' => 'Backorder invoice',
+            'last_modified_at' => '2026-01-05 12:00:00',
+            'raw_payload' => '{}',
+            'synced_at' => $now,
+            'created_at' => $now,
+            'updated_at' => $now,
+        ],
+        [
+            'netsuite_id' => 8003,
+            'tranid' => 'CM1001',
+            'other_ref_num' => 'PO-1001',
+            'type' => 'CustCred',
+            'status' => 'B',
+            'trandate' => '2026-01-06',
+            'total' => '-100.00',
+            'foreign_total' => '-100.00',
+            'currency' => 'USD',
+            'memo' => 'Credit memo',
+            'last_modified_at' => '2026-01-06 12:00:00',
+            'raw_payload' => '{}',
+            'synced_at' => $now,
+            'created_at' => $now,
+            'updated_at' => $now,
+        ],
+    ]);
+
+    $connection->table('transaction_links')->insert([
+        [
+            'link_key' => '9001:1:8001:1:OrdBill',
+            'previous_transaction_netsuite_id' => 9001,
+            'previous_line_id' => '1',
+            'previous_transaction_type' => 'SalesOrd',
+            'previous_transaction_number' => 'SO1001',
+            'previous_last_modified_at' => '2026-01-03 12:00:00',
+            'next_transaction_netsuite_id' => 8001,
+            'next_line_id' => '1',
+            'next_transaction_type' => 'CustInvc',
+            'next_transaction_number' => 'INV1001',
+            'next_last_modified_at' => '2026-01-04 12:00:00',
+            'link_type' => 'OrdBill',
+            'raw_payload' => '{}',
+            'synced_at' => $now,
+            'created_at' => $now,
+            'updated_at' => $now,
+        ],
+        [
+            'link_key' => '9001:2:8002:1:OrdBill',
+            'previous_transaction_netsuite_id' => 9001,
+            'previous_line_id' => '2',
+            'previous_transaction_type' => 'SalesOrd',
+            'previous_transaction_number' => 'SO1001',
+            'previous_last_modified_at' => '2026-01-03 12:00:00',
+            'next_transaction_netsuite_id' => 8002,
+            'next_line_id' => '1',
+            'next_transaction_type' => 'CustInvc',
+            'next_transaction_number' => 'INV1002',
+            'next_last_modified_at' => '2026-01-05 12:00:00',
+            'link_type' => 'OrdBill',
+            'raw_payload' => '{}',
+            'synced_at' => $now,
+            'created_at' => $now,
+            'updated_at' => $now,
+        ],
+        [
+            'link_key' => '8002:1:8003:1:Credit',
+            'previous_transaction_netsuite_id' => 8002,
+            'previous_line_id' => '1',
+            'previous_transaction_type' => 'CustInvc',
+            'previous_transaction_number' => 'INV1002',
+            'previous_last_modified_at' => '2026-01-05 12:00:00',
+            'next_transaction_netsuite_id' => 8003,
+            'next_line_id' => '1',
+            'next_transaction_type' => 'CustCred',
+            'next_transaction_number' => 'CM1001',
+            'next_last_modified_at' => '2026-01-06 12:00:00',
+            'link_type' => 'Credit',
+            'raw_payload' => '{}',
+            'synced_at' => $now,
+            'created_at' => $now,
+            'updated_at' => $now,
+        ],
+    ]);
+
+    Livewire::test('components::company-sales-orders-table', ['snapshotId' => $snapshot->id])
+        ->assertSee('View Invoices')
+        ->assertSee('View Credit Memos')
+        ->assertSee('related=8002%2C8001', false)
+        ->assertSee('related=8003', false)
+        ->assertSee('source=SO1001', false);
 });
 
 it('renders the last synced timestamp as a client-side relative timer', function (): void {
