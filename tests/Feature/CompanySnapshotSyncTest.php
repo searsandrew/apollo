@@ -40,8 +40,14 @@ it('creates a dynamic sqlite snapshot database for a company', function (): void
         ->and(Schema::connection($snapshot->connection_name)->hasTable('meta'))->toBeTrue()
         ->and(Schema::connection($snapshot->connection_name)->hasTable('transactions'))->toBeTrue()
         ->and(Schema::connection($snapshot->connection_name)->hasColumn('transactions', 'other_ref_num'))->toBeTrue()
+        ->and(Schema::connection($snapshot->connection_name)->hasColumn('transactions', 'billing_address'))->toBeTrue()
+        ->and(Schema::connection($snapshot->connection_name)->hasColumn('transactions', 'terms_name'))->toBeTrue()
+        ->and(Schema::connection($snapshot->connection_name)->hasColumn('transactions', 'ship_method_name'))->toBeTrue()
         ->and(Schema::connection($snapshot->connection_name)->hasTable('transaction_lines'))->toBeTrue()
+        ->and(Schema::connection($snapshot->connection_name)->hasColumn('transaction_lines', 'item_number'))->toBeTrue()
+        ->and(Schema::connection($snapshot->connection_name)->hasColumn('transaction_lines', 'quantity_backordered'))->toBeTrue()
         ->and(Schema::connection($snapshot->connection_name)->hasTable('transaction_links'))->toBeTrue()
+        ->and(Schema::connection($snapshot->connection_name)->hasTable('transaction_tracking_numbers'))->toBeTrue()
         ->and(Schema::connection($snapshot->connection_name)->hasTable('sync_state'))->toBeTrue();
 });
 
@@ -129,6 +135,25 @@ it('syncs transactions into sqlite and compiles central reporting summary', func
             ]);
         }
 
+        if (str_contains($query, 'FROM itemfulfillmentpackage')) {
+            return Http::response([
+                'items' => [
+                    [
+                        'transaction_id' => '9004',
+                        'tracking_number' => '1Z999',
+                    ],
+                ],
+                'hasMore' => false,
+            ]);
+        }
+
+        if (str_contains($query, 'FROM itemfulfillmentpackage')) {
+            return Http::response([
+                'items' => [],
+                'hasMore' => false,
+            ]);
+        }
+
         if (str_contains($query, 'FROM transactionline')) {
             return Http::response([
                 'items' => [
@@ -136,21 +161,33 @@ it('syncs transactions into sqlite and compiles central reporting summary', func
                         'transaction_id' => '9001',
                         'line_id' => '1',
                         'item' => '456',
-                        'item_name' => 'Widget',
+                        'item_number' => 'WIDGET',
+                        'item_description' => 'Widget',
                         'quantity' => '2',
+                        'quantitybackordered' => '0',
                         'rate' => '625.25',
                         'amount' => '1250.50',
                         'memo' => 'Invoice line',
+                        'mainline' => 'F',
+                        'taxline' => 'F',
+                        'transactiondiscount' => 'F',
+                        'transactionlinetype' => null,
                     ],
                     [
                         'transaction_id' => '9002',
                         'line_id' => '1',
                         'item' => '789',
-                        'item_name' => 'Bracket',
+                        'item_number' => 'BRACKET',
+                        'item_description' => 'Bracket',
                         'quantity' => '1',
+                        'quantitybackordered' => '0',
                         'rate' => '250',
                         'amount' => '250',
                         'memo' => 'Order line',
+                        'mainline' => 'F',
+                        'taxline' => 'F',
+                        'transactiondiscount' => 'F',
+                        'transactionlinetype' => null,
                     ],
                 ],
                 'hasMore' => false,
@@ -169,6 +206,13 @@ it('syncs transactions into sqlite and compiles central reporting summary', func
                     'total' => '1250.50',
                     'foreigntotal' => '1250.50',
                     'currency' => 'USD',
+                    'billing_address' => 'Acme Industrial'.PHP_EOL.'1 Main St',
+                    'shipping_address' => 'Acme Warehouse'.PHP_EOL.'2 Dock St',
+                    'terms_id' => '9',
+                    'terms_name' => 'Credit Card at Time of Purchase',
+                    'shipdate' => '1/16/2026',
+                    'ship_method_id' => '410',
+                    'ship_method_name' => 'Best Way',
                     'lastmodifieddate' => now()->toDateTimeString(),
                 ],
                 [
@@ -182,6 +226,13 @@ it('syncs transactions into sqlite and compiles central reporting summary', func
                     'total' => '250.00',
                     'foreigntotal' => '250.00',
                     'currency' => 'USD',
+                    'billing_address' => 'Acme Industrial'.PHP_EOL.'1 Main St',
+                    'shipping_address' => 'Acme Warehouse'.PHP_EOL.'2 Dock St',
+                    'terms_id' => '9',
+                    'terms_name' => 'Credit Card at Time of Purchase',
+                    'shipdate' => '12/31/2025',
+                    'ship_method_id' => '410',
+                    'ship_method_name' => 'Best Way',
                     'lastmodifieddate' => now()->toDateTimeString(),
                 ],
             ],
@@ -201,9 +252,14 @@ it('syncs transactions into sqlite and compiles central reporting summary', func
     expect($connection->table('transactions')->count())->toBe(2)
         ->and($connection->table('transaction_lines')->count())->toBe(2)
         ->and($connection->table('transaction_links')->count())->toBe(1)
+        ->and($connection->table('transaction_tracking_numbers')->count())->toBe(1)
         ->and($connection->table('transactions')->where('tranid', 'INV1001')->value('trandate'))->toBe('2026-01-15')
         ->and($connection->table('transactions')->where('tranid', 'SO1001')->value('other_ref_num'))->toBe('PO-1001')
         ->and($connection->table('transactions')->where('tranid', 'SO1001')->value('trandate'))->toBe('2025-12-31')
+        ->and($connection->table('transactions')->where('tranid', 'SO1001')->value('terms_name'))->toBe('Credit Card at Time of Purchase')
+        ->and($connection->table('transactions')->where('tranid', 'SO1001')->value('ship_method_name'))->toBe('Best Way')
+        ->and($connection->table('transaction_lines')->where('transaction_netsuite_id', 9002)->value('item_number'))->toBe('BRACKET')
+        ->and((float) $connection->table('transaction_lines')->where('transaction_netsuite_id', 9002)->value('quantity_backordered'))->toBe(0.0)
         ->and($connection->table('transaction_links')->where('previous_transaction_netsuite_id', 9002)->where('next_transaction_netsuite_id', 9001)->value('link_type'))->toBe('OrdBill')
         ->and($summary->transaction_count)->toBe(2)
         ->and($summary->invoice_total)->toBe('1250.50')
@@ -306,11 +362,17 @@ it('syncs only recently modified transactions when a transaction cursor exists',
                         'transaction_id' => '9002',
                         'line_id' => '1',
                         'item' => '789',
-                        'item_name' => 'Bracket',
+                        'item_number' => 'BRACKET',
+                        'item_description' => 'Bracket',
                         'quantity' => '1',
+                        'quantitybackordered' => '0',
                         'rate' => '250',
                         'amount' => '250',
                         'memo' => 'Updated order line',
+                        'mainline' => 'F',
+                        'taxline' => 'F',
+                        'transactiondiscount' => 'F',
+                        'transactionlinetype' => null,
                     ],
                 ],
                 'hasMore' => false,
@@ -372,7 +434,7 @@ it('syncs only recently modified transactions when a transaction cursor exists',
 
     $payload = json_decode((string) $connection->table('sync_state')->where('scope', 'transactions')->value('payload'), true);
 
-    expect($queries)->toHaveCount(3)
+    expect($queries)->toHaveCount(4)
         ->and($connection->table('transactions')->count())->toBe(2)
         ->and($connection->table('transactions')->where('netsuite_id', 9002)->value('memo'))->toBe('Updated order')
         ->and($connection->table('transaction_lines')->count())->toBe(1)
@@ -414,7 +476,7 @@ it('can force a full transaction sync even when a transaction cursor exists', fu
 
     $payload = json_decode((string) $connection->table('sync_state')->where('scope', 'transactions')->value('payload'), true);
 
-    expect($queries)->toHaveCount(3)
+    expect($queries)->toHaveCount(4)
         ->and($payload['mode'])->toBe('full')
         ->and($payload['modified_since'])->toBeNull();
 });

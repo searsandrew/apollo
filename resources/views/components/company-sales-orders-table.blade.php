@@ -254,7 +254,7 @@ new class extends Component {
             return null;
         }
 
-        return route('company.invoices', [
+        return route('company.invoices.index', [
             'company' => $this->snapshot->netsuite_company_id,
             'related' => $documents->pluck('netsuite_id')->implode(','),
             'source' => $salesOrderNumber,
@@ -395,7 +395,7 @@ new class extends Component {
                                         <flux:menu.item icon="document-text">{{ __('View Purchase Order') }}</flux:menu.item>
                                     @endcan
                                     @can('view order')
-                                        <flux:menu.item icon="document-magnifying-glass">{{ __('View Sales Order') }}</flux:menu.item>
+                                        <flux:menu.item icon="document-magnifying-glass" :href="route('company.sales-orders.show', [$this->snapshot->netsuite_company_id, $salesOrder->netsuite_id])" wire:navigate>{{ __('View Sales Order') }}</flux:menu.item>
                                     @endcan
                                     @can('view invoice')
                                         @if ($relatedInvoicesUrl !== null)

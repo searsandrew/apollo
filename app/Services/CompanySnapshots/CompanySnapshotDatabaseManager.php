@@ -109,6 +109,38 @@ class CompanySnapshotDatabaseManager
             });
         }
 
+        if (Schema::connection($connection)->hasTable('transactions')) {
+            Schema::connection($connection)->table('transactions', function ($table) use ($connection): void {
+                if (! Schema::connection($connection)->hasColumn('transactions', 'billing_address')) {
+                    $table->text('billing_address')->nullable();
+                }
+
+                if (! Schema::connection($connection)->hasColumn('transactions', 'shipping_address')) {
+                    $table->text('shipping_address')->nullable();
+                }
+
+                if (! Schema::connection($connection)->hasColumn('transactions', 'terms_id')) {
+                    $table->string('terms_id')->nullable()->index();
+                }
+
+                if (! Schema::connection($connection)->hasColumn('transactions', 'terms_name')) {
+                    $table->string('terms_name')->nullable();
+                }
+
+                if (! Schema::connection($connection)->hasColumn('transactions', 'ship_date')) {
+                    $table->date('ship_date')->nullable()->index();
+                }
+
+                if (! Schema::connection($connection)->hasColumn('transactions', 'ship_method_id')) {
+                    $table->string('ship_method_id')->nullable()->index();
+                }
+
+                if (! Schema::connection($connection)->hasColumn('transactions', 'ship_method_name')) {
+                    $table->string('ship_method_name')->nullable();
+                }
+            });
+        }
+
         if (! Schema::connection($connection)->hasTable('transaction_lines')) {
             Schema::connection($connection)->create('transaction_lines', function ($table): void {
                 $table->id();
@@ -116,14 +148,53 @@ class CompanySnapshotDatabaseManager
                 $table->string('line_id')->nullable()->index();
                 $table->unsignedBigInteger('item_id')->nullable()->index();
                 $table->string('item_name')->nullable();
+                $table->string('item_number')->nullable()->index();
+                $table->text('description')->nullable();
                 $table->decimal('quantity', 15, 4)->default(0);
+                $table->decimal('quantity_backordered', 15, 4)->default(0);
                 $table->decimal('rate', 15, 4)->default(0);
                 $table->decimal('amount', 15, 2)->default(0);
                 $table->text('memo')->nullable();
+                $table->boolean('is_mainline')->default(false)->index();
+                $table->boolean('is_tax_line')->default(false)->index();
+                $table->boolean('is_discount_line')->default(false)->index();
+                $table->string('line_type')->nullable()->index();
                 $table->text('raw_payload')->nullable();
                 $table->timestamp('synced_at')->nullable()->index();
                 $table->timestamps();
                 $table->unique(['transaction_netsuite_id', 'line_id']);
+            });
+        }
+
+        if (Schema::connection($connection)->hasTable('transaction_lines')) {
+            Schema::connection($connection)->table('transaction_lines', function ($table) use ($connection): void {
+                if (! Schema::connection($connection)->hasColumn('transaction_lines', 'item_number')) {
+                    $table->string('item_number')->nullable()->index();
+                }
+
+                if (! Schema::connection($connection)->hasColumn('transaction_lines', 'description')) {
+                    $table->text('description')->nullable();
+                }
+
+                if (! Schema::connection($connection)->hasColumn('transaction_lines', 'quantity_backordered')) {
+                    $table->decimal('quantity_backordered', 15, 4)->default(0);
+                }
+
+                if (! Schema::connection($connection)->hasColumn('transaction_lines', 'is_mainline')) {
+                    $table->boolean('is_mainline')->default(false)->index();
+                }
+
+                if (! Schema::connection($connection)->hasColumn('transaction_lines', 'is_tax_line')) {
+                    $table->boolean('is_tax_line')->default(false)->index();
+                }
+
+                if (! Schema::connection($connection)->hasColumn('transaction_lines', 'is_discount_line')) {
+                    $table->boolean('is_discount_line')->default(false)->index();
+                }
+
+                if (! Schema::connection($connection)->hasColumn('transaction_lines', 'line_type')) {
+                    $table->string('line_type')->nullable()->index();
+                }
             });
         }
 
@@ -145,6 +216,18 @@ class CompanySnapshotDatabaseManager
                 $table->text('raw_payload')->nullable();
                 $table->timestamp('synced_at')->nullable()->index();
                 $table->timestamps();
+            });
+        }
+
+        if (! Schema::connection($connection)->hasTable('transaction_tracking_numbers')) {
+            Schema::connection($connection)->create('transaction_tracking_numbers', function ($table): void {
+                $table->id();
+                $table->unsignedBigInteger('transaction_netsuite_id')->index();
+                $table->string('tracking_number')->index();
+                $table->text('raw_payload')->nullable();
+                $table->timestamp('synced_at')->nullable()->index();
+                $table->timestamps();
+                $table->unique(['transaction_netsuite_id', 'tracking_number']);
             });
         }
 

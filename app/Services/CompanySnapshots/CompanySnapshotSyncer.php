@@ -128,6 +128,7 @@ class CompanySnapshotSyncer
             $transactionOffset = 0;
             $transactionLineOffset = 0;
             $transactionLinkOffset = 0;
+            $transactionTrackingNumberOffset = 0;
             $limit = 1000;
             $previousCursor = $this->transactionCursor($snapshot);
             $modifiedSince = $full ? null : $this->incrementalModifiedSince($previousCursor);
@@ -135,6 +136,7 @@ class CompanySnapshotSyncer
             $transactionCount = 0;
             $transactionLineCount = 0;
             $transactionLinkCount = 0;
+            $transactionTrackingNumberCount = 0;
 
             do {
                 $page = $this->netSuite->fetchTransactionPage($snapshot->netsuite_company_id, $limit, $transactionOffset, $modifiedSince);
@@ -157,6 +159,13 @@ class CompanySnapshotSyncer
                 $this->writeTransactionLinks($snapshot, $page['items']);
                 $transactionLinkCount += count($page['items']);
                 $transactionLinkOffset += $limit;
+            } while ($page['has_more']);
+
+            do {
+                $page = $this->netSuite->fetchTransactionTrackingNumberPage($snapshot->netsuite_company_id, $limit, $transactionTrackingNumberOffset, $modifiedSince);
+                $this->writeTransactionTrackingNumbers($snapshot, $page['items']);
+                $transactionTrackingNumberCount += count($page['items']);
+                $transactionTrackingNumberOffset += $limit;
             } while ($page['has_more']);
 
             $currentCursor = $this->latestTransactionLastModifiedAt($snapshot) ?? $previousCursor;
@@ -183,6 +192,14 @@ class CompanySnapshotSyncer
                 'transaction_modified_since' => $modifiedSince,
                 'fetched_count' => $transactionLinkCount,
                 'last_offset' => $transactionLinkOffset,
+            ], $currentCursor);
+
+            $this->writeSyncState($snapshot, 'transaction_tracking_numbers', [
+                'mode' => $syncMode,
+                'transaction_cursor' => $currentCursor,
+                'transaction_modified_since' => $modifiedSince,
+                'fetched_count' => $transactionTrackingNumberCount,
+                'last_offset' => $transactionTrackingNumberOffset,
             ], $currentCursor);
 
             $snapshot->forceFill([
@@ -220,6 +237,7 @@ class CompanySnapshotSyncer
                 'transaction_count' => $connection->table('transactions')->count(),
                 'transaction_line_count' => $connection->table('transaction_lines')->count(),
                 'transaction_link_count' => $connection->table('transaction_links')->count(),
+                'transaction_tracking_number_count' => $connection->table('transaction_tracking_numbers')->count(),
                 'recent_transactions' => $connection->table('transactions')
                     ->orderByDesc('trandate')
                     ->orderByDesc('netsuite_id')
@@ -275,6 +293,13 @@ class CompanySnapshotSyncer
             'total' => $transaction['total'],
             'foreign_total' => $transaction['foreign_total'],
             'currency' => $transaction['currency'],
+            'billing_address' => $transaction['billing_address'] ?? null,
+            'shipping_address' => $transaction['shipping_address'] ?? null,
+            'terms_id' => $transaction['terms_id'] ?? null,
+            'terms_name' => $transaction['terms_name'] ?? null,
+            'ship_date' => $this->normalizeDateString($transaction['ship_date'] ?? null),
+            'ship_method_id' => $transaction['ship_method_id'] ?? null,
+            'ship_method_name' => $transaction['ship_method_name'] ?? null,
             'memo' => $transaction['memo'],
             'last_modified_at' => $transaction['last_modified_at'],
             'raw_payload' => json_encode($transaction['raw_payload'], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES),
@@ -286,7 +311,7 @@ class CompanySnapshotSyncer
         $connection->table('transactions')->upsert(
             $rows,
             ['netsuite_id'],
-            ['tranid', 'other_ref_num', 'type', 'status', 'trandate', 'total', 'foreign_total', 'currency', 'memo', 'last_modified_at', 'raw_payload', 'synced_at', 'updated_at'],
+            ['tranid', 'other_ref_num', 'type', 'status', 'trandate', 'total', 'foreign_total', 'currency', 'billing_address', 'shipping_address', 'terms_id', 'terms_name', 'ship_date', 'ship_method_id', 'ship_method_name', 'memo', 'last_modified_at', 'raw_payload', 'synced_at', 'updated_at'],
         );
     }
 
@@ -359,10 +384,17 @@ class CompanySnapshotSyncer
             'line_id' => $line['line_id'],
             'item_id' => $line['item_id'],
             'item_name' => $line['item_name'],
+            'item_number' => $line['item_number'] ?? $line['item_name'],
+            'description' => $line['description'] ?? $line['memo'],
             'quantity' => $line['quantity'],
+            'quantity_backordered' => $line['quantity_backordered'] ?? '0.0000',
             'rate' => $line['rate'],
             'amount' => $line['amount'],
             'memo' => $line['memo'],
+            'is_mainline' => (bool) ($line['is_mainline'] ?? false),
+            'is_tax_line' => (bool) ($line['is_tax_line'] ?? false),
+            'is_discount_line' => (bool) ($line['is_discount_line'] ?? false),
+            'line_type' => $line['line_type'] ?? null,
             'raw_payload' => json_encode($line['raw_payload'], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES),
             'synced_at' => $now,
             'created_at' => $now,
@@ -372,7 +404,35 @@ class CompanySnapshotSyncer
         $connection->table('transaction_lines')->upsert(
             $rows,
             ['transaction_netsuite_id', 'line_id'],
-            ['item_id', 'item_name', 'quantity', 'rate', 'amount', 'memo', 'raw_payload', 'synced_at', 'updated_at'],
+            ['item_id', 'item_name', 'item_number', 'description', 'quantity', 'quantity_backordered', 'rate', 'amount', 'memo', 'is_mainline', 'is_tax_line', 'is_discount_line', 'line_type', 'raw_payload', 'synced_at', 'updated_at'],
+        );
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $trackingNumbers
+     */
+    private function writeTransactionTrackingNumbers(CompanySnapshot $snapshot, array $trackingNumbers): void
+    {
+        if ($trackingNumbers === []) {
+            return;
+        }
+
+        $now = now();
+        $connection = $this->databaseManager->connection($snapshot);
+
+        $rows = collect($trackingNumbers)->map(fn (array $trackingNumber): array => [
+            'transaction_netsuite_id' => $trackingNumber['transaction_netsuite_id'],
+            'tracking_number' => $trackingNumber['tracking_number'],
+            'raw_payload' => json_encode($trackingNumber['raw_payload'], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES),
+            'synced_at' => $now,
+            'created_at' => $now,
+            'updated_at' => $now,
+        ])->all();
+
+        $connection->table('transaction_tracking_numbers')->upsert(
+            $rows,
+            ['transaction_netsuite_id', 'tracking_number'],
+            ['raw_payload', 'synced_at', 'updated_at'],
         );
     }
 

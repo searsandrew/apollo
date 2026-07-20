@@ -84,6 +84,13 @@ class NetSuiteCompanySnapshotRepository
                 total,
                 foreigntotal,
                 currency,
+                BUILTIN.DF(billingaddress) AS billing_address,
+                shipaddress AS shipping_address,
+                terms AS terms_id,
+                BUILTIN.DF(terms) AS terms_name,
+                shipdate,
+                shipmethod AS ship_method_id,
+                BUILTIN.DF(shipmethod) AS ship_method_name,
                 lastmodifieddate
             FROM transaction
             WHERE entity = {$netsuiteCompanyId}
@@ -114,6 +121,13 @@ class NetSuiteCompanySnapshotRepository
                 'total' => $this->decimalString($transaction['total'] ?? null),
                 'foreign_total' => $this->decimalString($transaction['foreigntotal'] ?? null),
                 'currency' => $this->nullableString($transaction['currency'] ?? null),
+                'billing_address' => $this->nullableString($transaction['billing_address'] ?? null),
+                'shipping_address' => $this->nullableString($transaction['shipping_address'] ?? null),
+                'terms_id' => $this->nullableString($transaction['terms_id'] ?? null),
+                'terms_name' => $this->nullableString($transaction['terms_name'] ?? null),
+                'ship_date' => $this->nullableDateString($transaction['shipdate'] ?? null),
+                'ship_method_id' => $this->nullableString($transaction['ship_method_id'] ?? null),
+                'ship_method_name' => $this->nullableString($transaction['ship_method_name'] ?? null),
                 'last_modified_at' => $this->nullableDateTimeString($transaction['lastmodifieddate'] ?? null),
                 'raw_payload' => $transaction,
             ];
@@ -137,11 +151,17 @@ class NetSuiteCompanySnapshotRepository
                 transactionline.transaction AS transaction_id,
                 transactionline.id AS line_id,
                 transactionline.item,
-                item.itemid AS item_name,
+                item.itemid AS item_number,
+                item.description AS item_description,
                 transactionline.quantity,
+                transactionline.quantitybackordered,
                 transactionline.rate,
                 transactionline.netamount AS amount,
-                transactionline.memo
+                transactionline.memo,
+                transactionline.mainline,
+                transactionline.taxline,
+                transactionline.transactiondiscount,
+                transactionline.transactionlinetype
             FROM transactionline
             LEFT JOIN item ON item.id = transactionline.item
             JOIN transaction ON transaction.id = transactionline.transaction
@@ -170,17 +190,73 @@ class NetSuiteCompanySnapshotRepository
                 'transaction_netsuite_id' => (int) $line['transaction_id'],
                 'line_id' => $this->nullableString($line['line_id'] ?? null),
                 'item_id' => $this->nullableInt($line['item'] ?? null),
-                'item_name' => $this->nullableString($line['item_name'] ?? null),
+                'item_name' => $this->nullableString($line['item_number'] ?? null),
+                'item_number' => $this->nullableString($line['item_number'] ?? null),
+                'description' => $this->nullableString($line['item_description'] ?? null)
+                    ?? $this->nullableString($line['memo'] ?? null),
                 'quantity' => $this->decimalString($line['quantity'] ?? null, 4),
+                'quantity_backordered' => $this->decimalString($line['quantitybackordered'] ?? null, 4),
                 'rate' => $this->decimalString($line['rate'] ?? null, 4),
                 'amount' => $this->decimalString($line['amount'] ?? null),
                 'memo' => $this->nullableString($line['memo'] ?? null),
+                'is_mainline' => $this->truthyString($line['mainline'] ?? null),
+                'is_tax_line' => $this->truthyString($line['taxline'] ?? null),
+                'is_discount_line' => $this->truthyString($line['transactiondiscount'] ?? null),
+                'line_type' => $this->nullableString($line['transactionlinetype'] ?? null),
                 'raw_payload' => $line,
             ];
         }
 
         return [
             'items' => $lines,
+            'has_more' => (bool) ($page['hasMore'] ?? false),
+        ];
+    }
+
+    /**
+     * @return array{items: array<int, array<string, mixed>>, has_more: bool}
+     */
+    public function fetchTransactionTrackingNumberPage(int $netsuiteCompanyId, int $limit = 1000, int $offset = 0, ?string $transactionModifiedSince = null): array
+    {
+        $modifiedSinceClause = $this->modifiedSinceClause('fulfillmentTransaction.lastmodifieddate', $transactionModifiedSince);
+
+        $sql = <<<SQL
+            SELECT
+                fulfillmentTransaction.id AS transaction_id,
+                itemfulfillmentpackage.packagetrackingnumber AS tracking_number
+            FROM itemfulfillmentpackage
+            JOIN transaction fulfillmentTransaction ON fulfillmentTransaction.id = itemfulfillmentpackage.itemfulfillment
+            WHERE fulfillmentTransaction.entity = {$netsuiteCompanyId}
+            {$modifiedSinceClause}
+            AND itemfulfillmentpackage.packagetrackingnumber IS NOT NULL
+            ORDER BY fulfillmentTransaction.trandate DESC, fulfillmentTransaction.id DESC, itemfulfillmentpackage.packagetrackingnumber
+        SQL;
+
+        $page = $this->briarRose->rest()->suiteql()->query($sql, [
+            'limit' => $limit,
+            'offset' => $offset,
+        ])->throw()->json();
+
+        $trackingNumbers = [];
+
+        foreach ($page['items'] ?? [] as $trackingNumber) {
+            if (! is_array($trackingNumber)) {
+                continue;
+            }
+
+            if (($trackingNumber['transaction_id'] ?? null) === null || blank($trackingNumber['tracking_number'] ?? null)) {
+                continue;
+            }
+
+            $trackingNumbers[] = [
+                'transaction_netsuite_id' => (int) $trackingNumber['transaction_id'],
+                'tracking_number' => $this->nullableString($trackingNumber['tracking_number'] ?? null),
+                'raw_payload' => $trackingNumber,
+            ];
+        }
+
+        return [
+            'items' => $trackingNumbers,
             'has_more' => (bool) ($page['hasMore'] ?? false),
         ];
     }
@@ -284,6 +360,11 @@ class NetSuiteCompanySnapshotRepository
         } catch (Throwable) {
             return null;
         }
+    }
+
+    private function truthyString(mixed $value): bool
+    {
+        return in_array(strtoupper((string) $value), ['T', 'TRUE', '1', 'Y', 'YES'], true);
     }
 
     private function modifiedSinceClause(string $field, ?string $modifiedSince): string

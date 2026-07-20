@@ -206,7 +206,7 @@ new class extends Component {
             return null;
         }
 
-        return route('company.sales-orders', [
+        return route('company.sales-orders.index', [
             'company' => $this->snapshot->netsuite_company_id,
             'related' => $salesOrders->pluck('netsuite_id')->implode(','),
             'source' => $documentNumber,
@@ -365,6 +365,7 @@ new class extends Component {
                     @php($typeLabel = $this->transactionTypeLabel($invoice->type))
                     @php($statusLabel = $this->transactionStatusLabel($invoice->type, $invoice->status))
                     @php($relatedSalesOrdersUrl = $this->relatedSalesOrdersUrl((int) $invoice->netsuite_id, (string) $invoiceNumber))
+                    @php($documentUrl = route($invoice->type === 'CustCred' ? 'company.credit-memos.show' : 'company.invoices.show', [$this->snapshot->netsuite_company_id, $invoice->netsuite_id]))
 
                     <flux:table.row wire:key="invoice-{{ $invoice->netsuite_id }}">
                         <flux:table.cell class="w-40 font-medium">
@@ -390,7 +391,7 @@ new class extends Component {
                                 <flux:button variant="ghost" size="sm" icon="ellipsis-horizontal" aria-label="{{ __('Billing document actions') }}"></flux:button>
                                 <flux:menu>
                                     @can('view invoice')
-                                        <flux:menu.item icon="document-currency-dollar">{{ $invoice->type === 'CustCred' ? __('View Credit Memo') : __('View Invoice') }}</flux:menu.item>
+                                        <flux:menu.item icon="document-currency-dollar" :href="$documentUrl" wire:navigate>{{ $invoice->type === 'CustCred' ? __('View Credit Memo') : __('View Invoice') }}</flux:menu.item>
                                     @endcan
                                     @can('view order')
                                         @if ($relatedSalesOrdersUrl !== null)
