@@ -28,7 +28,7 @@ class CompanySnapshot extends Model
     /** @use HasFactory<CompanySnapshotFactory> */
     use HasFactory;
 
-    public const int SCHEMA_VERSION = 1;
+    public const int SCHEMA_VERSION = 2;
 
     public const string STATUS_PENDING = 'pending';
 

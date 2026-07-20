@@ -271,7 +271,7 @@ class CompanySnapshotSyncer
             'other_ref_num' => $transaction['other_ref_num'] ?? null,
             'type' => $transaction['type'],
             'status' => $transaction['status'],
-            'trandate' => $transaction['trandate'],
+            'trandate' => $this->normalizeDateString($transaction['trandate'] ?? null),
             'total' => $transaction['total'],
             'foreign_total' => $transaction['foreign_total'],
             'currency' => $transaction['currency'],
@@ -440,6 +440,19 @@ class CompanySnapshotSyncer
 
         try {
             return Carbon::parse((string) $value)->format('Y-m-d H:i:s');
+        } catch (Throwable) {
+            return null;
+        }
+    }
+
+    private function normalizeDateString(mixed $value): ?string
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+
+        try {
+            return Carbon::parse((string) $value)->toDateString();
         } catch (Throwable) {
             return null;
         }

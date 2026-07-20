@@ -108,7 +108,7 @@ class NetSuiteCompanySnapshotRepository
                 'tranid' => $this->nullableString($transaction['tranid'] ?? null),
                 'other_ref_num' => $this->nullableString($transaction['otherrefnum'] ?? null),
                 'type' => $this->nullableString($transaction['type'] ?? null),
-                'trandate' => $this->nullableString($transaction['trandate'] ?? null),
+                'trandate' => $this->nullableDateString($transaction['trandate'] ?? null),
                 'status' => $this->nullableString($transaction['status'] ?? null),
                 'memo' => $this->nullableString($transaction['memo'] ?? null),
                 'total' => $this->decimalString($transaction['total'] ?? null),
@@ -270,6 +270,19 @@ class NetSuiteCompanySnapshotRepository
             return Carbon::parse((string) $value)->format('Y-m-d H:i:s');
         } catch (Throwable) {
             return (string) $value;
+        }
+    }
+
+    private function nullableDateString(mixed $value): ?string
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+
+        try {
+            return Carbon::parse((string) $value)->toDateString();
+        } catch (Throwable) {
+            return null;
         }
     }
 

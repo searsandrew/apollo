@@ -4,10 +4,13 @@ namespace App\Services\CompanySnapshots;
 
 use App\Models\CompanySnapshot;
 use Illuminate\Database\Connection;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Schema;
+use Throwable;
 
 class CompanySnapshotDatabaseManager
 {
@@ -155,16 +158,69 @@ class CompanySnapshotDatabaseManager
             });
         }
 
-        if (! Schema::connection($connection)->hasTable('schema_info')) {
+        $schemaInfoExists = Schema::connection($connection)->hasTable('schema_info');
+        $currentVersion = $schemaInfoExists
+            ? (int) (DB::connection($connection)->table('schema_info')->max('version') ?? 0)
+            : 0;
+
+        if (! $schemaInfoExists) {
             Schema::connection($connection)->create('schema_info', function ($table): void {
                 $table->unsignedInteger('version')->primary();
                 $table->timestamp('created_at')->nullable();
             });
+        }
 
-            DB::connection($connection)->table('schema_info')->insert([
+        if ($currentVersion < CompanySnapshot::SCHEMA_VERSION) {
+            $this->normalizeTransactionDates($connection);
+
+            DB::connection($connection)->table('schema_info')->updateOrInsert([
                 'version' => CompanySnapshot::SCHEMA_VERSION,
+            ], [
                 'created_at' => now(),
             ]);
+        }
+    }
+
+    private function normalizeTransactionDates(string $connection): void
+    {
+        $database = DB::connection($connection);
+
+        $database->table('transactions')
+            ->select(['id', 'trandate'])
+            ->whereNotNull('trandate')
+            ->where('trandate', '!=', '')
+            ->whereRaw("trandate NOT GLOB '????-??-??'")
+            ->orderBy('id')
+            ->chunkById(500, function (Collection $transactions) use ($database): void {
+                $now = now();
+
+                foreach ($transactions as $transaction) {
+                    $normalizedDate = $this->normalizeDateString($transaction->trandate);
+
+                    if ($normalizedDate === $transaction->trandate) {
+                        continue;
+                    }
+
+                    $database->table('transactions')
+                        ->where('id', $transaction->id)
+                        ->update([
+                            'trandate' => $normalizedDate,
+                            'updated_at' => $now,
+                        ]);
+                }
+            });
+    }
+
+    private function normalizeDateString(mixed $value): ?string
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+
+        try {
+            return Carbon::parse((string) $value)->toDateString();
+        } catch (Throwable) {
+            return null;
         }
     }
 }

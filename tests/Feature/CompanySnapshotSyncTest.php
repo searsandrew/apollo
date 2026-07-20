@@ -163,7 +163,7 @@ it('syncs transactions into sqlite and compiles central reporting summary', func
                     'id' => '9001',
                     'tranid' => 'INV1001',
                     'type' => 'CustInvc',
-                    'trandate' => now()->toDateString(),
+                    'trandate' => '1/15/2026',
                     'status' => 'Paid In Full',
                     'memo' => 'Original invoice',
                     'total' => '1250.50',
@@ -176,7 +176,7 @@ it('syncs transactions into sqlite and compiles central reporting summary', func
                     'tranid' => 'SO1001',
                     'otherrefnum' => 'PO-1001',
                     'type' => 'SalesOrd',
-                    'trandate' => now()->toDateString(),
+                    'trandate' => '12/31/2025',
                     'status' => 'Pending Fulfillment',
                     'memo' => 'Open order',
                     'total' => '250.00',
@@ -201,13 +201,72 @@ it('syncs transactions into sqlite and compiles central reporting summary', func
     expect($connection->table('transactions')->count())->toBe(2)
         ->and($connection->table('transaction_lines')->count())->toBe(2)
         ->and($connection->table('transaction_links')->count())->toBe(1)
+        ->and($connection->table('transactions')->where('tranid', 'INV1001')->value('trandate'))->toBe('2026-01-15')
         ->and($connection->table('transactions')->where('tranid', 'SO1001')->value('other_ref_num'))->toBe('PO-1001')
+        ->and($connection->table('transactions')->where('tranid', 'SO1001')->value('trandate'))->toBe('2025-12-31')
         ->and($connection->table('transaction_links')->where('previous_transaction_netsuite_id', 9002)->where('next_transaction_netsuite_id', 9001)->value('link_type'))->toBe('OrdBill')
         ->and($summary->transaction_count)->toBe(2)
         ->and($summary->invoice_total)->toBe('1250.50')
         ->and($summary->open_order_total)->toBe('250.00')
         ->and($summary->company_name)->toBe('Acme Industrial')
         ->and($summary->terms)->toBe('Net 30');
+});
+
+it('normalizes legacy transaction dates when ensuring a snapshot database', function (): void {
+    $syncer = app(CompanySnapshotSyncer::class);
+    $snapshot = $syncer->ensureSnapshot(286);
+    $connection = app(CompanySnapshotDatabaseManager::class)->connection($snapshot);
+
+    $connection->table('schema_info')->delete();
+    $connection->table('schema_info')->insert([
+        'version' => 1,
+        'created_at' => now(),
+    ]);
+
+    $connection->table('transactions')->insert([
+        [
+            'netsuite_id' => 9001,
+            'tranid' => 'SO1000',
+            'other_ref_num' => 'PO-1000',
+            'type' => 'SalesOrd',
+            'status' => 'G',
+            'trandate' => '7/1/2026',
+            'total' => '150.00',
+            'foreign_total' => '150.00',
+            'currency' => 'USD',
+            'memo' => 'Legacy order',
+            'last_modified_at' => '2026-07-01 12:00:00',
+            'raw_payload' => '{}',
+            'synced_at' => now(),
+            'created_at' => now(),
+            'updated_at' => now(),
+        ],
+        [
+            'netsuite_id' => 9002,
+            'tranid' => 'SO1001',
+            'other_ref_num' => 'PO-1001',
+            'type' => 'SalesOrd',
+            'status' => 'G',
+            'trandate' => '12/1/2025',
+            'total' => '250.00',
+            'foreign_total' => '250.00',
+            'currency' => 'USD',
+            'memo' => 'Legacy order',
+            'last_modified_at' => '2025-12-01 12:00:00',
+            'raw_payload' => '{}',
+            'synced_at' => now(),
+            'created_at' => now(),
+            'updated_at' => now(),
+        ],
+    ]);
+
+    app(CompanySnapshotDatabaseManager::class)->ensureDatabase($snapshot);
+
+    $connection = app(CompanySnapshotDatabaseManager::class)->connection($snapshot);
+
+    expect($connection->table('transactions')->where('tranid', 'SO1000')->value('trandate'))->toBe('2026-07-01')
+        ->and($connection->table('transactions')->where('tranid', 'SO1001')->value('trandate'))->toBe('2025-12-01')
+        ->and($connection->table('schema_info')->max('version'))->toBe(CompanySnapshot::SCHEMA_VERSION);
 });
 
 it('syncs only recently modified transactions when a transaction cursor exists', function (): void {
