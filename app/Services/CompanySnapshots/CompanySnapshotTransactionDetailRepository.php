@@ -27,8 +27,10 @@ class CompanySnapshotTransactionDetailRepository
 
     public function displayLines(CompanySnapshot $snapshot, int $netsuiteTransactionId): Collection
     {
+        $transaction = $this->find($snapshot, $netsuiteTransactionId);
+
         return $this->lines($snapshot, $netsuiteTransactionId)
-            ->reject(fn (object $line): bool => (bool) $line->is_mainline || (bool) $line->is_tax_line || (bool) $line->is_discount_line)
+            ->reject(fn (object $line): bool => $this->isNonMerchandiseLine($transaction, $line))
             ->filter(fn (object $line): bool => filled($line->item_number) || filled($line->description) || (float) $line->amount !== 0.0)
             ->values();
     }
@@ -61,8 +63,13 @@ class CompanySnapshotTransactionDetailRepository
         $discount = $allLines
             ->filter(fn (object $line): bool => (bool) $line->is_discount_line)
             ->sum(fn (object $line): float => abs((float) $line->amount));
+        $explicitFreight = $allLines
+            ->filter(fn (object $line): bool => $this->isFreightLine($transaction, $line))
+            ->sum(fn (object $line): float => abs((float) $line->amount));
         $total = abs((float) ($transaction->foreign_total ?: $transaction->total));
-        $freight = max(0.0, round($total - $subtotal + $discount, 2));
+        $freight = $explicitFreight > 0
+            ? round($explicitFreight, 2)
+            : max(0.0, round($total - $subtotal + $discount, 2));
 
         return [
             'subtotal' => round($subtotal, 2),
@@ -110,5 +117,61 @@ class CompanySnapshotTransactionDetailRepository
             ->unique()
             ->values()
             ->all();
+    }
+
+    private function isNonMerchandiseLine(?object $transaction, object $line): bool
+    {
+        return (bool) $line->is_mainline
+            || (bool) $line->is_tax_line
+            || (bool) $line->is_discount_line
+            || ($transaction !== null && $this->isFreightLine($transaction, $line));
+    }
+
+    private function isFreightLine(object $transaction, object $line): bool
+    {
+        if ((bool) $line->is_mainline || (bool) $line->is_tax_line || (bool) $line->is_discount_line) {
+            return false;
+        }
+
+        if (abs((float) $line->amount) === 0.0) {
+            return false;
+        }
+
+        $payload = json_decode((string) $line->raw_payload, true);
+
+        if (is_array($payload) && $this->truthyString($payload['shipping'] ?? null)) {
+            return true;
+        }
+
+        $itemId = trim((string) $line->item_id);
+        $shipMethodId = trim((string) ($transaction->ship_method_id ?? ''));
+
+        if ($itemId !== '' && $shipMethodId !== '' && $itemId === $shipMethodId) {
+            return true;
+        }
+
+        if (filled($line->item_number) || filled($line->description)) {
+            return false;
+        }
+
+        $memo = strtolower(trim((string) $line->memo));
+
+        if ($memo === '') {
+            return true;
+        }
+
+        return str_contains($memo, 'shipping')
+            || str_contains($memo, 'freight')
+            || str_contains($memo, 'ups')
+            || str_contains($memo, 'fedex')
+            || str_contains($memo, 'usps')
+            || str_contains($memo, 'ground')
+            || str_contains($memo, 'delivery')
+            || str_contains($memo, 'best way');
+    }
+
+    private function truthyString(mixed $value): bool
+    {
+        return in_array(strtoupper((string) $value), ['T', 'TRUE', '1', 'Y', 'YES'], true);
     }
 }

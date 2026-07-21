@@ -2,6 +2,7 @@
 
 use App\Models\CompanySnapshot;
 use App\Services\CompanySnapshots\CompanySnapshotDatabaseManager;
+use App\Services\CompanySnapshots\CompanySnapshotTransactionDetailRepository;
 use Illuminate\Support\Facades\File;
 use Livewire\Livewire;
 
@@ -199,6 +200,135 @@ it('renders a sales order detail from transaction snapshot data', function (): v
         ->assertSee('$0.94')
         ->assertSee('$3.76')
         ->assertDontSee('IF50051');
+});
+
+it('moves shipping method lines into freight instead of the item table', function (): void {
+    $snapshot = CompanySnapshot::factory()->create([
+        'netsuite_company_id' => 256,
+        'status' => CompanySnapshot::STATUS_ACTIVE,
+        'meta_synced_at' => now(),
+        'transactions_synced_at' => now(),
+        'summary_synced_at' => now(),
+    ]);
+
+    $connection = app(CompanySnapshotDatabaseManager::class)->ensureDatabase($snapshot);
+    $now = now();
+
+    $connection->table('transactions')->insert([
+        'netsuite_id' => 1224564,
+        'tranid' => 'SO28751',
+        'other_ref_num' => '11520',
+        'type' => 'SalesOrd',
+        'status' => 'G',
+        'trandate' => '2026-06-25',
+        'total' => '142.72',
+        'foreign_total' => '142.72',
+        'currency' => 'USD',
+        'billing_address' => 'Appliance Pts Plus A-0320',
+        'shipping_address' => 'Appliance Pts Plus A-0320',
+        'terms_id' => '2',
+        'terms_name' => 'Net 30',
+        'ship_date' => '2026-06-25',
+        'ship_method_id' => '410',
+        'ship_method_name' => 'Best Way',
+        'memo' => 'Thank you for your order!',
+        'last_modified_at' => '2026-06-26 00:00:00',
+        'raw_payload' => '{}',
+        'synced_at' => $now,
+        'created_at' => $now,
+        'updated_at' => $now,
+    ]);
+
+    $connection->table('transaction_lines')->insert([
+        [
+            'transaction_netsuite_id' => 1224564,
+            'line_id' => '1',
+            'item_id' => 214,
+            'item_name' => 'DA97-15217DCM',
+            'item_number' => 'DA97-15217DCM',
+            'description' => 'Ice Maker',
+            'quantity' => '-2.0000',
+            'quantity_backordered' => '0.0000',
+            'rate' => '54.9900',
+            'amount' => '-109.98',
+            'memo' => 'Ice Maker',
+            'is_mainline' => false,
+            'is_tax_line' => false,
+            'is_discount_line' => false,
+            'line_type' => null,
+            'raw_payload' => '{}',
+            'synced_at' => $now,
+            'created_at' => $now,
+            'updated_at' => $now,
+        ],
+        [
+            'transaction_netsuite_id' => 1224564,
+            'line_id' => '2',
+            'item_id' => 294,
+            'item_name' => '3392519CM',
+            'item_number' => '3392519CM',
+            'description' => 'Thermal Fuse',
+            'quantity' => '-15.0000',
+            'quantity_backordered' => '0.0000',
+            'rate' => '0.8500',
+            'amount' => '-12.75',
+            'memo' => 'Thermal Fuse',
+            'is_mainline' => false,
+            'is_tax_line' => false,
+            'is_discount_line' => false,
+            'line_type' => null,
+            'raw_payload' => '{}',
+            'synced_at' => $now,
+            'created_at' => $now,
+            'updated_at' => $now,
+        ],
+    ]);
+
+    $shippingLineId = $connection->table('transaction_lines')->insertGetId([
+        'transaction_netsuite_id' => 1224564,
+        'line_id' => '3',
+        'item_id' => 410,
+        'item_name' => null,
+        'item_number' => null,
+        'description' => null,
+        'quantity' => '-1.0000',
+        'quantity_backordered' => '0.0000',
+        'rate' => '19.9900',
+        'amount' => '-19.99',
+        'memo' => null,
+        'is_mainline' => false,
+        'is_tax_line' => false,
+        'is_discount_line' => false,
+        'line_type' => null,
+        'raw_payload' => '{}',
+        'synced_at' => $now,
+        'created_at' => $now,
+        'updated_at' => $now,
+    ]);
+
+    $repository = app(CompanySnapshotTransactionDetailRepository::class);
+    $transaction = $repository->find($snapshot, 1224564);
+    $displayLines = $repository->displayLines($snapshot, 1224564);
+    $totals = $repository->totals($transaction, $displayLines, $repository->lines($snapshot, 1224564));
+
+    expect($displayLines->pluck('line_id')->all())->toBe(['1', '2'])
+        ->and($totals['subtotal'])->toBe(122.73)
+        ->and($totals['freight'])->toBe(19.99)
+        ->and($totals['total'])->toBe(142.72);
+
+    Livewire::test('components::company-transaction-detail', [
+        'snapshotId' => $snapshot->id,
+        'transactionId' => 1224564,
+        'types' => ['SalesOrd'],
+        'documentLabel' => 'Sales Order',
+        'numberLabel' => 'Order #',
+    ])
+        ->assertSee('SO28751')
+        ->assertSee('DA97-15217DCM')
+        ->assertSee('$122.73')
+        ->assertSee('$19.99')
+        ->assertSee('$142.72')
+        ->assertDontSeeHtml('transaction-line-'.$shippingLineId);
 });
 
 it('renders the sales order show page with the shared transaction detail component', function (): void {
