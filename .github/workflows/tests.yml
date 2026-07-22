@@ -50,17 +50,25 @@ jobs:
 
       - name: Configure Flux credentials
         env:
-          FLUX_USERNAME: ${{ secrets.FLUX_USERNAME }}
+          FLUX_USERNAME: ${{ secrets.FLUX_USERNAME || secrets.FLUX_EMAIL }}
           FLUX_LICENSE_KEY: ${{ secrets.FLUX_LICENSE_KEY }}
+          COMPOSER_AUTH: ${{ secrets.COMPOSER_AUTH }}
         run: |
-          if [ -z "$FLUX_USERNAME" ] || [ -z "$FLUX_LICENSE_KEY" ]; then
-            echo "::error::Missing FLUX_USERNAME or FLUX_LICENSE_KEY repository secret."
-            exit 1
+          if [ -n "$FLUX_USERNAME" ] && [ -n "$FLUX_LICENSE_KEY" ]; then
+            composer config --auth http-basic.composer.fluxui.dev "$FLUX_USERNAME" "$FLUX_LICENSE_KEY"
+            exit 0
           fi
 
-          composer config --auth http-basic.composer.fluxui.dev "$FLUX_USERNAME" "$FLUX_LICENSE_KEY"
+          if [ -n "$COMPOSER_AUTH" ]; then
+            echo "Using COMPOSER_AUTH for Composer private package credentials."
+            exit 0
+          fi
+
+          echo "::warning::No Flux Composer credentials were configured. Add FLUX_USERNAME and FLUX_LICENSE_KEY repository secrets if Composer cannot install Flux Pro."
 
       - name: Install Composer dependencies
+        env:
+          COMPOSER_AUTH: ${{ secrets.COMPOSER_AUTH }}
         run: composer install --no-interaction --no-progress --prefer-dist --optimize-autoloader
 
       - name: Install Node dependencies
