@@ -133,10 +133,6 @@ class CompanySnapshotTransactionDetailRepository
             return false;
         }
 
-        if (abs((float) $line->amount) === 0.0) {
-            return false;
-        }
-
         $payload = json_decode((string) $line->raw_payload, true);
 
         if (is_array($payload) && $this->truthyString($payload['shipping'] ?? null)) {
@@ -148,6 +144,10 @@ class CompanySnapshotTransactionDetailRepository
 
         if ($itemId !== '' && $shipMethodId !== '' && $itemId === $shipMethodId) {
             return true;
+        }
+
+        if (abs((float) $line->amount) === 0.0) {
+            return false;
         }
 
         if (filled($line->item_number) || filled($line->description)) {

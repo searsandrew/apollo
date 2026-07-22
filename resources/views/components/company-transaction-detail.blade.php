@@ -218,6 +218,11 @@ new class extends Component {
 
     public function shouldPollRecordRefresh(): bool
     {
+        return $this->isRefreshingRecord();
+    }
+
+    public function isRefreshingRecord(): bool
+    {
         return $this->recordRefreshRequestedAt !== null
             || $this->snapshot->status === CompanySnapshot::STATUS_SYNCING_TRANSACTIONS;
     }
@@ -252,9 +257,10 @@ new class extends Component {
     @php($showLineItemNumbers = $this->showLineItemNumbers())
     @php($showBackorderColumn = $this->showBackorderColumn())
     @php($lineTableClass = $showLineItemNumbers || $showBackorderColumn ? 'w-full min-w-[760px] table-fixed' : 'w-full min-w-[560px] table-fixed')
+    @php($isRefreshingRecord = $this->isRefreshingRecord())
 
     <div
-        @if ($this->shouldPollRecordRefresh()) wire:poll.visible.5s="refreshRecordSyncState" @endif
+        @if($this->shouldPollRecordRefresh()) wire:poll.visible.5s="refreshRecordSyncState" @endif
         class="rounded-lg border border-zinc-200 bg-white p-4 text-sm shadow-sm dark:border-white/10 dark:bg-zinc-900"
     >
         <div class="mb-4 flex flex-wrap items-start justify-between gap-4">
@@ -271,20 +277,20 @@ new class extends Component {
 
             @if ($this->syncDate() !== null)
                 <div class="flex flex-col items-end gap-1 text-right">
-                    <button
-                        type="button"
-                        wire:click="refreshRecord"
-                        wire:loading.attr="disabled"
-                        wire:target="refreshRecord"
-                        class="text-xs text-zinc-500 underline-offset-4 hover:text-zinc-800 hover:underline disabled:cursor-wait disabled:opacity-70 dark:text-zinc-400 dark:hover:text-zinc-100"
-                        title="{{ __('Refresh this record from the data source') }}"
-                    >
-                        <span wire:loading.remove wire:target="refreshRecord">{{ __('Synced :date', ['date' => $this->syncDate()?->diffForHumans()]) }}</span>
-                        <span wire:loading wire:target="refreshRecord">{{ __('Queueing refresh') }}</span>
-                    </button>
-
-                    @if ($this->recordRefreshRequestedAt !== null || $this->snapshot->status === CompanySnapshot::STATUS_SYNCING_TRANSACTIONS)
-                        <span class="text-[11px] text-zinc-500 dark:text-zinc-400">{{ __('Refreshing record') }}</span>
+                    @if ($isRefreshingRecord)
+                        <span class="animate-pulse text-[11px] text-zinc-500 dark:text-zinc-400">{{ __('Refreshing record') }}</span>
+                    @else
+                        <button
+                            type="button"
+                            wire:click="refreshRecord"
+                            wire:loading.attr="disabled"
+                            wire:target="refreshRecord"
+                            class="cursor-pointer text-xs text-zinc-500 underline-offset-4 hover:text-zinc-800 hover:underline disabled:cursor-wait disabled:opacity-70 dark:text-zinc-400 dark:hover:text-zinc-100"
+                            title="{{ __('Refresh this record from the data source') }}"
+                        >
+                            <span wire:loading.remove wire:target="refreshRecord">{{ __('Synced :date', ['date' => $this->syncDate()?->diffForHumans()]) }}</span>
+                            <span wire:loading wire:target="refreshRecord">{{ __('Queueing refresh') }}</span>
+                        </button>
                     @endif
                 </div>
             @endif
@@ -376,7 +382,7 @@ new class extends Component {
             </div>
             <div class="lg:col-span-2">
                 <div class="text-xs font-semibold uppercase text-zinc-500 dark:text-zinc-400">{{ __('Tracking Number') }}</div>
-                <div class="mt-1 break-words text-zinc-900 dark:text-zinc-100">
+                <div class="mt-1 wrap-break-word text-zinc-900 dark:text-zinc-100">
                     {{ $this->trackingNumbers->isEmpty() ? '-' : $this->trackingNumbers->join(', ') }}
                 </div>
             </div>

@@ -333,6 +333,106 @@ it('moves shipping method lines into freight instead of the item table', functio
         ->assertDontSeeHtml('transaction-line-'.$shippingLineId);
 });
 
+it('hides zero amount ship method marker lines from transaction details', function (): void {
+    $snapshot = CompanySnapshot::factory()->create([
+        'netsuite_company_id' => 16,
+        'status' => CompanySnapshot::STATUS_ACTIVE,
+        'meta_synced_at' => now(),
+        'transactions_synced_at' => now(),
+        'summary_synced_at' => now(),
+    ]);
+
+    $connection = app(CompanySnapshotDatabaseManager::class)->ensureDatabase($snapshot);
+    $now = now();
+
+    $connection->table('transactions')->insert([
+        'netsuite_id' => 1233802,
+        'tranid' => 'INV50319',
+        'other_ref_num' => 'PO-30001',
+        'type' => 'CustInvc',
+        'status' => 'B',
+        'trandate' => '2026-07-08',
+        'total' => '189.15',
+        'foreign_total' => '189.15',
+        'currency' => 'USD',
+        'billing_address' => 'Appliance Pts Ctr A-0230',
+        'shipping_address' => 'Appliance Pts Ctr A-0230',
+        'terms_id' => '9',
+        'terms_name' => 'Credit Card at Time of Purchase',
+        'ship_date' => '2026-07-08',
+        'ship_method_id' => '4',
+        'ship_method_name' => 'UPS Ground',
+        'memo' => 'Thank you!',
+        'last_modified_at' => '2026-07-08 12:00:00',
+        'raw_payload' => '{}',
+        'synced_at' => $now,
+        'created_at' => $now,
+        'updated_at' => $now,
+    ]);
+
+    $connection->table('transaction_lines')->insert([
+        [
+            'transaction_netsuite_id' => 1233802,
+            'line_id' => '1',
+            'item_id' => 272,
+            'item_name' => '279827CM',
+            'item_number' => '279827CM',
+            'description' => 'Motor - Dryer',
+            'quantity' => '-5.0000',
+            'quantity_backordered' => '0.0000',
+            'rate' => '37.8300',
+            'amount' => '-189.15',
+            'memo' => 'Motor - Dryer',
+            'is_mainline' => false,
+            'is_tax_line' => false,
+            'is_discount_line' => false,
+            'line_type' => null,
+            'raw_payload' => '{}',
+            'synced_at' => $now,
+            'created_at' => $now,
+            'updated_at' => $now,
+        ],
+    ]);
+
+    $shippingLineId = $connection->table('transaction_lines')->insertGetId([
+        'transaction_netsuite_id' => 1233802,
+        'line_id' => '2',
+        'item_id' => 4,
+        'item_name' => null,
+        'item_number' => null,
+        'description' => 'UPS Ground',
+        'quantity' => '-1.0000',
+        'quantity_backordered' => '0.0000',
+        'rate' => '0.0000',
+        'amount' => '0.00',
+        'memo' => 'UPS Ground',
+        'is_mainline' => false,
+        'is_tax_line' => false,
+        'is_discount_line' => false,
+        'line_type' => null,
+        'raw_payload' => '{}',
+        'synced_at' => $now,
+        'created_at' => $now,
+        'updated_at' => $now,
+    ]);
+
+    $repository = app(CompanySnapshotTransactionDetailRepository::class);
+
+    expect($repository->displayLines($snapshot, 1233802)->pluck('line_id')->all())->toBe(['1']);
+
+    Livewire::test('components::company-transaction-detail', [
+        'snapshotId' => $snapshot->id,
+        'transactionId' => 1233802,
+        'types' => ['CustInvc'],
+        'documentLabel' => 'Invoice',
+        'numberLabel' => 'Invoice #',
+    ])
+        ->assertSee('INV50319')
+        ->assertSee('279827CM')
+        ->assertSee('Motor - Dryer')
+        ->assertDontSeeHtml('transaction-line-'.$shippingLineId);
+});
+
 it('uses item name as the line item number fallback for credit memos', function (): void {
     $snapshot = CompanySnapshot::factory()->create([
         'netsuite_company_id' => 16,
@@ -483,8 +583,11 @@ it('queues a targeted record refresh from the synced timestamp control', functio
     ])
         ->assertSee('Synced')
         ->assertSeeHtml('text-xs')
+        ->assertSeeHtml('cursor-pointer')
         ->call('refreshRecord')
-        ->assertSee('Refreshing record');
+        ->assertSee('Refreshing record')
+        ->assertSeeHtml('animate-pulse')
+        ->assertDontSee('Synced');
 
     Queue::assertPushed(
         SyncCompanySnapshotTransaction::class,
