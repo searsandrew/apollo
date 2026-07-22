@@ -44,7 +44,7 @@ class RolesAndPermissionsSeeder extends Seeder
             'owner' => ['view api', 'create api', 'delete api', 'view customer', 'create customer', 'edit customer', 'delete customer', 'view dashboard', 'view flier', 'create flier', 'edit flier', 'delete flier', 'view file', 'create file', 'view instruction', 'view inventory', 'view invoice', 'view item', 'view landing', 'create landing', 'edit landing', 'delete landing', 'view msrp', 'create msrp', 'edit msrp', 'delete msrp', 'view order', 'create order', 'edit order', 'delete order', 'view page', 'view price', 'view rebate', 'view return', 'create return', 'edit return', 'delete return'],
             'accounting' => ['view customer', 'create customer', 'edit customer', 'delete customer', 'view dashboard', 'view instruction', 'view inventory', 'view invoice', 'view item', 'view msrp', 'view order', 'create order', 'edit order', 'view page', 'view price', 'view rebate', 'view return', 'create return', 'edit return'],
             'employee' => ['view customer', 'edit customer', 'view dashboard', 'view file', 'view instruction', 'view inventory', 'view item', 'view msrp', 'view order', 'create order', 'edit order', 'view page', 'view price', 'view return', 'create return'],
-            'customer' => ['view item', 'view instruction', 'view landing', 'view msrp'],
+            'customer' => ['view item', 'view instruction', 'view landing', 'view msrp', 'view order', 'create order', 'edit order'],
         ];
     }
 }

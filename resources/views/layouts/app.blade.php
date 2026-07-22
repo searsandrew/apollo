@@ -12,7 +12,7 @@
                     {{ __('Dashboard') }}
                 </flux:navbar.item>
                 @can('view order')
-                    <flux:navbar.item :href="route('dashboard')" :current="request()->routeIs('order.*')" wire:navigate>
+                    <flux:navbar.item :href="route('order.index')" :current="request()->routeIs('order.*')" wire:navigate>
                         {{ __('Orders') }}
                     </flux:navbar.item>
                 @endcan
@@ -71,14 +71,18 @@
                     @livewire('search')
                 @endcan
                 @can('create order')
-                    <flux:tooltip :content="__('Create Order')" position="bottom">
-                        <flux:navbar.item
-                            class="h-10 max-lg:hidden [&>div>svg]:size-5"
-                            icon="fa-cart-plus"
-                            href="#"
-                            :label="__('Create Order')"
-                        />
-                    </flux:tooltip>
+                    <form method="POST" action="{{ route('order.create') }}" class="contents">
+                        @csrf
+                        <flux:tooltip :content="__('Create Order')" position="bottom">
+                            <flux:button
+                                type="submit"
+                                variant="ghost"
+                                class="h-10 max-lg:hidden [&>div>svg]:size-5"
+                                icon="fa-cart-plus"
+                                :label="__('Create Order')"
+                            />
+                        </flux:tooltip>
+                    </form>
                 @endcan
                 @can('view instruction')
                     <flux:tooltip :content="__('Documentation')" position="bottom">
