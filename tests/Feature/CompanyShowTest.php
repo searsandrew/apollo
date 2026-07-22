@@ -2,8 +2,9 @@
 
 use App\Models\CompanySnapshot;
 use App\Models\CompanySummary;
+use App\Models\User;
 use Illuminate\Support\Facades\File;
-use Livewire\Livewire;
+use Spatie\Permission\Models\Permission;
 
 beforeEach(function (): void {
     config([
@@ -29,11 +30,14 @@ it('renders the company header from the summary', function (): void {
         'account_number' => 'A-0121',
     ]);
 
-    Livewire::test('pages::company.show', ['company' => '286'])
-        ->assertSee('Acme Industrial')
-        ->assertSee('A-0121')
-        ->assertSee('data-current="data-current"', false)
-        ->call('$refresh')
+    Permission::findOrCreate('view company');
+
+    $user = User::factory()->create();
+    $user->givePermissionTo('view company');
+
+    $this->actingAs($user)
+        ->get(route('company.show', 286))
+        ->assertOk()
         ->assertSee('Acme Industrial')
         ->assertSee('A-0121')
         ->assertSee('data-current="data-current"', false);
