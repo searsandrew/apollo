@@ -240,6 +240,7 @@ new class extends Component {
 
         return Carbon::parse((string) $this->transaction->synced_at);
     }
+
 };
 ?>
 

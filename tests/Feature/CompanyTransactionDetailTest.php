@@ -2,11 +2,13 @@
 
 use App\Jobs\SyncCompanySnapshotTransaction;
 use App\Models\CompanySnapshot;
+use App\Models\User;
 use App\Services\CompanySnapshots\CompanySnapshotDatabaseManager;
 use App\Services\CompanySnapshots\CompanySnapshotTransactionDetailRepository;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Queue;
 use Livewire\Livewire;
+use Spatie\Permission\Models\Permission;
 
 beforeEach(function (): void {
     config([
@@ -643,3 +645,55 @@ it('renders the sales order show page with the shared transaction detail compone
         ->assertSee('Sales Order')
         ->assertSee('Credit Card at Time of Purchase');
 });
+
+it('renders routed transaction pages with document-specific titles', function (string $permission, string $routeName, int $transactionId, string $transactionNumber, string $transactionType, string $documentLabel): void {
+    Permission::findOrCreate($permission);
+
+    $user = User::factory()->create();
+    $user->givePermissionTo($permission);
+    $this->actingAs($user);
+
+    $snapshot = CompanySnapshot::factory()->create([
+        'netsuite_company_id' => 16,
+        'status' => CompanySnapshot::STATUS_ACTIVE,
+        'meta_synced_at' => now(),
+        'transactions_synced_at' => now(),
+        'summary_synced_at' => now(),
+    ]);
+
+    $connection = app(CompanySnapshotDatabaseManager::class)->ensureDatabase($snapshot);
+    $now = now();
+
+    $connection->table('transactions')->insert([
+        'netsuite_id' => $transactionId,
+        'tranid' => $transactionNumber,
+        'other_ref_num' => 'PO-1001',
+        'type' => $transactionType,
+        'status' => 'G',
+        'trandate' => '2026-04-28',
+        'total' => '1829.05',
+        'foreign_total' => '1829.05',
+        'currency' => 'USD',
+        'billing_address' => 'Appliance Pts Ctr A-0230',
+        'shipping_address' => 'Appliance Pts Ctr A-0230',
+        'terms_id' => '9',
+        'terms_name' => 'Credit Card at Time of Purchase',
+        'ship_date' => '2026-04-28',
+        'ship_method_id' => '410',
+        'ship_method_name' => 'Best Way',
+        'memo' => 'Thank you for the order.',
+        'last_modified_at' => '2026-04-28 12:00:00',
+        'raw_payload' => '{}',
+        'synced_at' => $now,
+        'created_at' => $now,
+        'updated_at' => $now,
+    ]);
+
+    $this->get(route($routeName, [16, $transactionId]))
+        ->assertOk()
+        ->assertSee($documentLabel.' '.$transactionNumber.' - '.config('app.name', 'Laravel'));
+})->with([
+    'sales order' => ['view order', 'company.sales-orders.show', 1172768, 'SO27799', 'SalesOrd', 'Sales Order'],
+    'invoice' => ['view invoice', 'company.invoices.show', 1172769, 'INV27799', 'CustInvc', 'Invoice'],
+    'credit memo' => ['view invoice', 'company.credit-memos.show', 1172770, 'CM27799', 'CustCred', 'Credit Memo'],
+]);

@@ -1,6 +1,8 @@
 <?php
 
+use App\Models\CompanySnapshot;
 use App\Services\CompanySnapshots\CompanySnapshotSyncer;
+use App\Services\CompanySnapshots\CompanySnapshotTransactionDetailRepository;
 use Livewire\Component;
 
 new class extends Component {
@@ -12,9 +14,12 @@ new class extends Component {
 
     private CompanySnapshotSyncer $snapshotSyncer;
 
-    public function boot(CompanySnapshotSyncer $snapshotSyncer): void
+    private CompanySnapshotTransactionDetailRepository $transactionRepository;
+
+    public function boot(CompanySnapshotSyncer $snapshotSyncer, CompanySnapshotTransactionDetailRepository $transactionRepository): void
     {
         $this->snapshotSyncer = $snapshotSyncer;
+        $this->transactionRepository = $transactionRepository;
     }
 
     public function mount(string $company, string $transaction): void
@@ -29,6 +34,22 @@ new class extends Component {
 
         $this->snapshotId = $snapshot->id;
         $this->snapshotSyncer->queueRefreshIfStale($snapshot, transactionStaleDays: 1);
+    }
+
+    public function render()
+    {
+        return $this->view()->title($this->pageTitle('Credit Memo', ['CustCred']));
+    }
+
+    /**
+     * @param  array<int, string>  $types
+     */
+    private function pageTitle(string $documentLabel, array $types): string
+    {
+        $snapshot = CompanySnapshot::query()->findOrFail($this->snapshotId);
+        $documentNumber = $this->transactionRepository->documentNumber($snapshot, $this->transactionId, $types);
+
+        return filled($documentNumber) ? $documentLabel.' '.$documentNumber : $documentLabel;
     }
 };
 ?>

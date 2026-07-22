@@ -1,9 +1,10 @@
 <?php
 
 use App\Services\CompanySnapshots\CompanySnapshotSyncer;
+use Livewire\Attributes\Title;
 use Livewire\Component;
 
-new class extends Component {
+new #[Title('Invoices')] class extends Component {
     public int $netsuiteCompanyId;
 
     public int $snapshotId;
@@ -17,7 +18,7 @@ new class extends Component {
 
     public function mount(string $company): void
     {
-        $this->netsuiteCompanyId = (int) $company;
+        $this->netsuiteCompanyId = (int)$company;
 
         abort_if($this->netsuiteCompanyId <= 0, 404);
 
@@ -31,6 +32,6 @@ new class extends Component {
 
 <section class="w-full">
     <x-pages::company.layout :company="$netsuiteCompanyId">
-        <livewire:components::company-invoices-table :snapshot-id="$snapshotId" />
+        <livewire:components::company-invoices-table :snapshot-id="$snapshotId"/>
     </x-pages::company.layout>
 </section>

@@ -25,6 +25,26 @@ class CompanySnapshotTransactionDetailRepository
             ->first();
     }
 
+    /**
+     * @param  array<int, string>  $types
+     */
+    public function documentNumber(CompanySnapshot $snapshot, int $netsuiteTransactionId, array $types = []): ?string
+    {
+        $transaction = $this->databaseManager
+            ->connection($snapshot)
+            ->table('transactions')
+            ->select(['netsuite_id', 'tranid'])
+            ->where('netsuite_id', $netsuiteTransactionId)
+            ->when($types !== [], fn ($query) => $query->whereIn('type', $types))
+            ->first();
+
+        if ($transaction === null) {
+            return null;
+        }
+
+        return filled($transaction->tranid) ? (string) $transaction->tranid : (string) $transaction->netsuite_id;
+    }
+
     public function displayLines(CompanySnapshot $snapshot, int $netsuiteTransactionId): Collection
     {
         $transaction = $this->find($snapshot, $netsuiteTransactionId);
