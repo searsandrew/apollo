@@ -1,9 +1,11 @@
 <?php
 
+use App\Jobs\SyncCompanySnapshotTransaction;
 use App\Models\CompanySnapshot;
 use App\Services\CompanySnapshots\CompanySnapshotDatabaseManager;
 use App\Services\CompanySnapshots\CompanySnapshotTransactionDetailRepository;
 use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Queue;
 use Livewire\Livewire;
 
 beforeEach(function (): void {
@@ -431,6 +433,64 @@ it('uses item name as the line item number fallback for credit memos', function 
         ->assertSeeHtml('title="'.e($description).'"')
         ->assertSeeHtml('class="block max-w-full truncate"')
         ->assertDontSee('B/O');
+});
+
+it('queues a targeted record refresh from the synced timestamp control', function (): void {
+    Queue::fake();
+
+    $snapshot = CompanySnapshot::factory()->create([
+        'netsuite_company_id' => 16,
+        'status' => CompanySnapshot::STATUS_ACTIVE,
+        'meta_synced_at' => now(),
+        'transactions_synced_at' => now()->subDays(4),
+        'summary_synced_at' => now()->subDays(4),
+    ]);
+
+    $connection = app(CompanySnapshotDatabaseManager::class)->ensureDatabase($snapshot);
+    $now = now()->subDays(4);
+
+    $connection->table('transactions')->insert([
+        'netsuite_id' => 1233802,
+        'tranid' => 'SO30001',
+        'other_ref_num' => 'PO-30001',
+        'type' => 'SalesOrd',
+        'status' => 'G',
+        'trandate' => '2026-07-18',
+        'total' => '129.97',
+        'foreign_total' => '129.97',
+        'currency' => 'USD',
+        'billing_address' => 'Appliance Pts Ctr A-0230',
+        'shipping_address' => 'Appliance Pts Ctr A-0230',
+        'terms_id' => '9',
+        'terms_name' => 'Credit Card at Time of Purchase',
+        'ship_date' => '2026-07-18',
+        'ship_method_id' => '410',
+        'ship_method_name' => 'Best Way',
+        'memo' => 'Thank you for the order.',
+        'last_modified_at' => '2026-07-18 12:00:00',
+        'raw_payload' => '{}',
+        'synced_at' => $now,
+        'created_at' => $now,
+        'updated_at' => $now,
+    ]);
+
+    Livewire::test('components::company-transaction-detail', [
+        'snapshotId' => $snapshot->id,
+        'transactionId' => 1233802,
+        'types' => ['SalesOrd'],
+        'documentLabel' => 'Sales Order',
+        'numberLabel' => 'Order #',
+    ])
+        ->assertSee('Synced')
+        ->assertSeeHtml('text-xs')
+        ->call('refreshRecord')
+        ->assertSee('Refreshing record');
+
+    Queue::assertPushed(
+        SyncCompanySnapshotTransaction::class,
+        fn (SyncCompanySnapshotTransaction $job): bool => $job->companySnapshotId === $snapshot->id
+            && $job->netsuiteTransactionId === 1233802,
+    );
 });
 
 it('renders the sales order show page with the shared transaction detail component', function (): void {

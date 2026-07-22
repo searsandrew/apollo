@@ -4,6 +4,7 @@ namespace App\Services\CompanySnapshots;
 
 use App\Jobs\RefreshCompanySnapshotSummary;
 use App\Jobs\SyncCompanySnapshotMeta;
+use App\Jobs\SyncCompanySnapshotTransaction;
 use App\Jobs\SyncCompanySnapshotTransactions;
 use App\Models\CompanySnapshot;
 use App\Models\CompanySummary;
@@ -76,6 +77,15 @@ class CompanySnapshotSyncer
             if (! app()->runningInConsole()) {
                 $pendingDispatch->afterResponse();
             }
+        }
+    }
+
+    public function queueTransactionRefresh(CompanySnapshot $snapshot, int $netsuiteTransactionId): void
+    {
+        $pendingDispatch = SyncCompanySnapshotTransaction::dispatch($snapshot->id, $netsuiteTransactionId);
+
+        if (! app()->runningInConsole()) {
+            $pendingDispatch->afterResponse();
         }
     }
 
@@ -205,6 +215,57 @@ class CompanySnapshotSyncer
             $snapshot->forceFill([
                 'status' => CompanySnapshot::STATUS_ACTIVE,
                 'transactions_synced_at' => now(),
+                'sync_finished_at' => now(),
+                'last_error' => null,
+            ])->save();
+
+            return $snapshot->refresh();
+        } catch (Throwable $exception) {
+            $this->markFailed($snapshot, $exception);
+
+            throw $exception;
+        }
+    }
+
+    public function syncTransaction(CompanySnapshot $snapshot, int $netsuiteTransactionId): CompanySnapshot
+    {
+        try {
+            $snapshot->forceFill([
+                'status' => CompanySnapshot::STATUS_SYNCING_TRANSACTIONS,
+                'sync_started_at' => now(),
+                'last_error' => null,
+            ])->save();
+
+            $this->databaseManager->ensureDatabase($snapshot);
+
+            $transaction = $this->netSuite->fetchTransaction($snapshot->netsuite_company_id, $netsuiteTransactionId);
+
+            if ($transaction === null) {
+                throw new RuntimeException('Transaction '.$netsuiteTransactionId.' was not found for company '.$snapshot->netsuite_company_id.'.');
+            }
+
+            $lines = $this->netSuite->fetchTransactionLines($snapshot->netsuite_company_id, $netsuiteTransactionId);
+            $links = $this->netSuite->fetchTransactionLinksForTransaction($snapshot->netsuite_company_id, $netsuiteTransactionId);
+            $trackingNumbers = $this->netSuite->fetchTransactionTrackingNumbersForTransactions(
+                $snapshot->netsuite_company_id,
+                $this->trackingTransactionIds($netsuiteTransactionId, (string) ($transaction['type'] ?? ''), $links),
+            );
+
+            $this->writeTransactions($snapshot, [$transaction]);
+            $this->writeTransactionLines($snapshot, $lines);
+            $this->writeTransactionLinks($snapshot, $links);
+            $this->writeTransactionTrackingNumbers($snapshot, $trackingNumbers);
+
+            $this->writeSyncState($snapshot, 'transaction:'.$netsuiteTransactionId, [
+                'mode' => 'targeted',
+                'transaction_id' => $netsuiteTransactionId,
+                'line_count' => count($lines),
+                'link_count' => count($links),
+                'tracking_number_count' => count($trackingNumbers),
+            ], $transaction['last_modified_at'] ?? null);
+
+            $snapshot->forceFill([
+                'status' => CompanySnapshot::STATUS_ACTIVE,
                 'sync_finished_at' => now(),
                 'last_error' => null,
             ])->save();
@@ -453,6 +514,31 @@ class CompanySnapshotSyncer
                 'updated_at' => $now,
             ],
         ], ['scope'], ['cursor_value', 'synced_at', 'payload', 'updated_at']);
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $links
+     * @return array<int, int>
+     */
+    private function trackingTransactionIds(int $netsuiteTransactionId, string $transactionType, array $links): array
+    {
+        $ids = $transactionType === 'ItemShip' ? [$netsuiteTransactionId] : [];
+
+        foreach ($links as $link) {
+            if (($link['previous_transaction_type'] ?? null) === 'ItemShip') {
+                $ids[] = (int) $link['previous_transaction_netsuite_id'];
+            }
+
+            if (($link['next_transaction_type'] ?? null) === 'ItemShip') {
+                $ids[] = (int) $link['next_transaction_netsuite_id'];
+            }
+        }
+
+        return collect($ids)
+            ->filter(fn (int $id): bool => $id > 0)
+            ->unique()
+            ->values()
+            ->all();
     }
 
     private function transactionCursor(CompanySnapshot $snapshot): ?string

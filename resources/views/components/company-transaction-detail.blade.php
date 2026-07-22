@@ -2,6 +2,7 @@
 
 use App\Models\CompanySnapshot;
 use App\Services\CompanySnapshots\CompanySnapshotTransactionDetailRepository;
+use App\Services\CompanySnapshots\CompanySnapshotSyncer;
 use App\Services\NetSuite\NetSuiteTransactionStatusMapper;
 use Carbon\CarbonInterface;
 use Illuminate\Support\Carbon;
@@ -24,15 +25,21 @@ new class extends Component {
 
     public string $numberLabel = 'Transaction #';
 
+    public ?string $recordRefreshRequestedAt = null;
+
     private CompanySnapshotTransactionDetailRepository $transactionRepository;
+
+    private CompanySnapshotSyncer $snapshotSyncer;
 
     private NetSuiteTransactionStatusMapper $statusMapper;
 
     public function boot(
         CompanySnapshotTransactionDetailRepository $transactionRepository,
+        CompanySnapshotSyncer $snapshotSyncer,
         NetSuiteTransactionStatusMapper $statusMapper,
     ): void {
         $this->transactionRepository = $transactionRepository;
+        $this->snapshotSyncer = $snapshotSyncer;
         $this->statusMapper = $statusMapper;
     }
 
@@ -180,6 +187,46 @@ new class extends Component {
         return $line->item_number ?: $line->item_name ?: '';
     }
 
+    public function refreshRecord(): void
+    {
+        if ($this->transaction === null) {
+            return;
+        }
+
+        $this->recordRefreshRequestedAt = now()->toIso8601String();
+
+        $this->snapshotSyncer->queueTransactionRefresh($this->snapshot, $this->transactionId);
+
+        $this->clearTransactionMemo();
+    }
+
+    public function refreshRecordSyncState(): void
+    {
+        $this->clearTransactionMemo();
+
+        if ($this->recordRefreshRequestedAt === null) {
+            return;
+        }
+
+        $requestedAt = Carbon::parse($this->recordRefreshRequestedAt);
+        $syncDate = $this->syncDate();
+
+        if ($syncDate?->gte($requestedAt) || $requestedAt->lt(now()->subMinutes(5))) {
+            $this->recordRefreshRequestedAt = null;
+        }
+    }
+
+    public function shouldPollRecordRefresh(): bool
+    {
+        return $this->recordRefreshRequestedAt !== null
+            || $this->snapshot->status === CompanySnapshot::STATUS_SYNCING_TRANSACTIONS;
+    }
+
+    private function clearTransactionMemo(): void
+    {
+        unset($this->snapshot, $this->transaction, $this->allLines, $this->displayLines, $this->trackingNumbers);
+    }
+
     public function syncDate(): ?CarbonInterface
     {
         if ($this->transaction === null || blank($this->transaction->synced_at)) {
@@ -206,7 +253,10 @@ new class extends Component {
     @php($showBackorderColumn = $this->showBackorderColumn())
     @php($lineTableClass = $showLineItemNumbers || $showBackorderColumn ? 'w-full min-w-[760px] table-fixed' : 'w-full min-w-[560px] table-fixed')
 
-    <div class="rounded-lg border border-zinc-200 bg-white p-4 text-sm shadow-sm dark:border-white/10 dark:bg-zinc-900">
+    <div
+        @if ($this->shouldPollRecordRefresh()) wire:poll.visible.5s="refreshRecordSyncState" @endif
+        class="rounded-lg border border-zinc-200 bg-white p-4 text-sm shadow-sm dark:border-white/10 dark:bg-zinc-900"
+    >
         <div class="mb-4 flex flex-wrap items-start justify-between gap-4">
             <div>
                 <div class="flex flex-wrap items-center gap-2">
@@ -220,7 +270,23 @@ new class extends Component {
             </div>
 
             @if ($this->syncDate() !== null)
-                <flux:text class="text-right">{{ __('Synced :date', ['date' => $this->syncDate()?->diffForHumans()]) }}</flux:text>
+                <div class="flex flex-col items-end gap-1 text-right">
+                    <button
+                        type="button"
+                        wire:click="refreshRecord"
+                        wire:loading.attr="disabled"
+                        wire:target="refreshRecord"
+                        class="text-xs text-zinc-500 underline-offset-4 hover:text-zinc-800 hover:underline disabled:cursor-wait disabled:opacity-70 dark:text-zinc-400 dark:hover:text-zinc-100"
+                        title="{{ __('Refresh this record from the data source') }}"
+                    >
+                        <span wire:loading.remove wire:target="refreshRecord">{{ __('Synced :date', ['date' => $this->syncDate()?->diffForHumans()]) }}</span>
+                        <span wire:loading wire:target="refreshRecord">{{ __('Queueing refresh') }}</span>
+                    </button>
+
+                    @if ($this->recordRefreshRequestedAt !== null || $this->snapshot->status === CompanySnapshot::STATUS_SYNCING_TRANSACTIONS)
+                        <span class="text-[11px] text-zinc-500 dark:text-zinc-400">{{ __('Refreshing record') }}</span>
+                    @endif
+                </div>
             @endif
         </div>
 

@@ -481,6 +481,163 @@ it('can force a full transaction sync even when a transaction cursor exists', fu
         ->and($payload['modified_since'])->toBeNull();
 });
 
+it('syncs a single transaction by id without advancing the company transaction cursor', function (): void {
+    $queries = [];
+
+    Http::fake(function (Request $request) use (&$queries) {
+        $query = $request->data()['q'] ?? '';
+        $queries[] = $query;
+
+        expect($query)->not->toContain('TO_DATE');
+
+        if (str_contains($query, 'FROM transactionline')) {
+            expect($query)->toContain('transactionline.transaction = 1233802');
+
+            return Http::response([
+                'items' => [
+                    [
+                        'transaction_id' => '1233802',
+                        'line_id' => '1',
+                        'item' => '214',
+                        'item_number' => 'DA97-15217DCM',
+                        'item_description' => 'Ice Maker',
+                        'quantity' => '2',
+                        'quantitybackordered' => '0',
+                        'rate' => '54.99',
+                        'amount' => '109.98',
+                        'memo' => 'Ice Maker',
+                        'mainline' => 'F',
+                        'taxline' => 'F',
+                        'transactiondiscount' => 'F',
+                        'transactionlinetype' => null,
+                    ],
+                    [
+                        'transaction_id' => '1233802',
+                        'line_id' => '2',
+                        'item' => '410',
+                        'item_number' => null,
+                        'item_description' => null,
+                        'quantity' => '1',
+                        'quantitybackordered' => '0',
+                        'rate' => '19.99',
+                        'amount' => '19.99',
+                        'memo' => null,
+                        'mainline' => 'F',
+                        'taxline' => 'F',
+                        'transactiondiscount' => 'F',
+                        'transactionlinetype' => null,
+                    ],
+                ],
+                'hasMore' => false,
+            ]);
+        }
+
+        if (str_contains($query, 'FROM nextTransactionLineLink')) {
+            expect($query)->toContain('nextTransactionLineLink.previousDoc = 1233802');
+
+            return Http::response([
+                'items' => [
+                    [
+                        'previous_doc' => '1233802',
+                        'previous_line' => '1',
+                        'next_doc' => '1233810',
+                        'next_line' => '1',
+                        'link_type' => 'ShipRcpt',
+                        'previous_type' => 'SalesOrd',
+                        'previous_tranid' => 'SO30001',
+                        'previous_lastmodifieddate' => '2026-07-18 12:00:00',
+                        'next_type' => 'ItemShip',
+                        'next_tranid' => 'IF50100',
+                        'next_lastmodifieddate' => '2026-07-18 13:00:00',
+                    ],
+                ],
+                'hasMore' => false,
+            ]);
+        }
+
+        if (str_contains($query, 'FROM itemfulfillmentpackage')) {
+            expect($query)->toContain('fulfillmentTransaction.id IN (1233810)');
+
+            return Http::response([
+                'items' => [
+                    [
+                        'transaction_id' => '1233810',
+                        'tracking_number' => '1Z123',
+                    ],
+                ],
+                'hasMore' => false,
+            ]);
+        }
+
+        expect($query)->toContain('FROM transaction')
+            ->and($query)->toContain('id = 1233802');
+
+        return Http::response([
+            'items' => [
+                [
+                    'id' => '1233802',
+                    'tranid' => 'SO30001',
+                    'otherrefnum' => 'PO-30001',
+                    'type' => 'SalesOrd',
+                    'trandate' => '2026-07-18',
+                    'status' => 'G',
+                    'memo' => 'Targeted refresh order',
+                    'total' => '129.97',
+                    'foreigntotal' => '129.97',
+                    'currency' => 'USD',
+                    'billing_address' => 'Acme Industrial',
+                    'shipping_address' => 'Acme Warehouse',
+                    'terms_id' => '9',
+                    'terms_name' => 'Credit Card at Time of Purchase',
+                    'shipdate' => '2026-07-18',
+                    'ship_method_id' => '410',
+                    'ship_method_name' => 'Best Way',
+                    'lastmodifieddate' => '2026-07-18 12:00:00',
+                ],
+            ],
+            'hasMore' => false,
+        ]);
+    });
+
+    $syncer = app(CompanySnapshotSyncer::class);
+    $snapshot = $syncer->ensureSnapshot(286);
+    $connection = app(CompanySnapshotDatabaseManager::class)->connection($snapshot);
+
+    $connection->table('transactions')->insert([
+        'netsuite_id' => 1233802,
+        'tranid' => 'SO30001',
+        'other_ref_num' => null,
+        'type' => 'SalesOrd',
+        'status' => 'B',
+        'trandate' => '2026-07-18',
+        'total' => '109.98',
+        'foreign_total' => '109.98',
+        'currency' => 'USD',
+        'memo' => 'Stale order',
+        'last_modified_at' => '2026-07-18 12:00:00',
+        'raw_payload' => '{}',
+        'synced_at' => now()->subDays(4),
+        'created_at' => now()->subDays(4),
+        'updated_at' => now()->subDays(4),
+    ]);
+
+    $syncer->syncTransaction($snapshot, 1233802);
+
+    $payload = json_decode((string) $connection->table('sync_state')->where('scope', 'transaction:1233802')->value('payload'), true);
+
+    expect($queries)->toHaveCount(4)
+        ->and($connection->table('transactions')->where('netsuite_id', 1233802)->value('memo'))->toBe('Targeted refresh order')
+        ->and($connection->table('transactions')->where('netsuite_id', 1233802)->value('other_ref_num'))->toBe('PO-30001')
+        ->and($connection->table('transaction_lines')->where('transaction_netsuite_id', 1233802)->count())->toBe(2)
+        ->and($connection->table('transaction_lines')->where('transaction_netsuite_id', 1233802)->where('line_id', '1')->value('item_number'))->toBe('DA97-15217DCM')
+        ->and($connection->table('transaction_links')->where('previous_transaction_netsuite_id', 1233802)->where('next_transaction_netsuite_id', 1233810)->value('link_type'))->toBe('ShipRcpt')
+        ->and($connection->table('transaction_tracking_numbers')->where('transaction_netsuite_id', 1233810)->value('tracking_number'))->toBe('1Z123')
+        ->and($connection->table('sync_state')->where('scope', 'transactions')->exists())->toBeFalse()
+        ->and($snapshot->refresh()->transactions_synced_at)->toBeNull()
+        ->and($payload['mode'])->toBe('targeted')
+        ->and($payload['line_count'])->toBe(2);
+});
+
 it('dispatches full transaction refresh jobs for weekly reconciliation', function (): void {
     Queue::fake();
 
