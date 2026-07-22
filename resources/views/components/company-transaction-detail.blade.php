@@ -153,6 +153,33 @@ new class extends Component {
         return rtrim(rtrim(number_format($quantity, 4), '0'), '.') ?: '0';
     }
 
+    public function showLineItemNumbers(): bool
+    {
+        return $this->displayLines->contains(fn (object $line): bool => filled($this->lineItemNumber($line)));
+    }
+
+    public function showBackorderColumn(): bool
+    {
+        return $this->transaction?->type === 'SalesOrd';
+    }
+
+    public function lineTableColumnCount(): int
+    {
+        return 4
+            + ($this->showLineItemNumbers() ? 1 : 0)
+            + ($this->showBackorderColumn() ? 1 : 0);
+    }
+
+    public function lineDescription(object $line): string
+    {
+        return $line->description ?: $line->memo ?: '-';
+    }
+
+    public function lineItemNumber(object $line): string
+    {
+        return $line->item_number ?: $line->item_name ?: '';
+    }
+
     public function syncDate(): ?CarbonInterface
     {
         if ($this->transaction === null || blank($this->transaction->synced_at)) {
@@ -175,6 +202,9 @@ new class extends Component {
     @php($billToLines = $this->addressLines($transaction->billing_address))
     @php($shipToLines = $this->addressLines($transaction->shipping_address))
     @php($totals = $this->totals())
+    @php($showLineItemNumbers = $this->showLineItemNumbers())
+    @php($showBackorderColumn = $this->showBackorderColumn())
+    @php($lineTableClass = $showLineItemNumbers || $showBackorderColumn ? 'w-full min-w-[760px] table-fixed' : 'w-full min-w-[560px] table-fixed')
 
     <div class="rounded-lg border border-zinc-200 bg-white p-4 text-sm shadow-sm dark:border-white/10 dark:bg-zinc-900">
         <div class="mb-4 flex flex-wrap items-start justify-between gap-4">
@@ -287,29 +317,43 @@ new class extends Component {
         </div>
 
         <div class="mt-4 overflow-x-auto">
-            <flux:table class="w-full min-w-[760px] table-fixed">
+            <flux:table class="{{ $lineTableClass }}">
                 <flux:table.columns>
-                    <flux:table.column class="w-40">{{ __('Item No.') }}</flux:table.column>
+                    @if ($showLineItemNumbers)
+                        <flux:table.column class="w-40">{{ __('Item No.') }}</flux:table.column>
+                    @endif
                     <flux:table.column>{{ __('Description') }}</flux:table.column>
                     <flux:table.column align="end" class="w-14">{{ __('Qty') }}</flux:table.column>
-                    <flux:table.column align="end" class="w-14">{{ __('B/O') }}</flux:table.column>
+                    @if ($showBackorderColumn)
+                        <flux:table.column align="end" class="w-14">{{ __('B/O') }}</flux:table.column>
+                    @endif
                     <flux:table.column align="end" class="w-24">{{ __('Price') }}</flux:table.column>
                     <flux:table.column align="end" class="w-24">{{ __('Amount') }}</flux:table.column>
                 </flux:table.columns>
 
                 <flux:table.rows>
                     @forelse ($this->displayLines as $line)
+                        @php($lineDescription = $this->lineDescription($line))
+                        @php($lineItemNumber = $this->lineItemNumber($line))
                         <flux:table.row wire:key="transaction-line-{{ $line->id }}">
-                            <flux:table.cell>{{ $line->item_number ?: '-' }}</flux:table.cell>
-                            <flux:table.cell>{{ $line->description ?: $line->memo ?: '-' }}</flux:table.cell>
+                            @if ($showLineItemNumbers)
+                                <flux:table.cell>
+                                    <span class="block max-w-full truncate" title="{{ $lineItemNumber ?: '-' }}">{{ $lineItemNumber ?: '-' }}</span>
+                                </flux:table.cell>
+                            @endif
+                            <flux:table.cell class="min-w-0">
+                                <span class="block max-w-full truncate" title="{{ $lineDescription }}">{{ $lineDescription }}</span>
+                            </flux:table.cell>
                             <flux:table.cell align="end">{{ $this->formattedQuantity($line->quantity) }}</flux:table.cell>
-                            <flux:table.cell align="end">{{ $this->formattedQuantity($line->quantity_backordered) }}</flux:table.cell>
+                            @if ($showBackorderColumn)
+                                <flux:table.cell align="end">{{ $this->formattedQuantity($line->quantity_backordered) }}</flux:table.cell>
+                            @endif
                             <flux:table.cell align="end">{{ $this->formattedMoney(abs((float) $line->rate)) }}</flux:table.cell>
                             <flux:table.cell align="end">{{ $this->formattedMoney(abs((float) $line->amount)) }}</flux:table.cell>
                         </flux:table.row>
                     @empty
                         <flux:table.row>
-                            <flux:table.cell colspan="6">
+                            <flux:table.cell :colspan="$this->lineTableColumnCount()">
                                 <div class="py-8 text-center text-zinc-500 dark:text-zinc-400">{{ __('No line items are available for this transaction yet.') }}</div>
                             </flux:table.cell>
                         </flux:table.row>
