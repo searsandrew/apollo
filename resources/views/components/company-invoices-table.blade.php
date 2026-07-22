@@ -367,7 +367,17 @@ new class extends Component {
                     @php($relatedSalesOrdersUrl = $this->relatedSalesOrdersUrl((int) $invoice->netsuite_id, (string) $invoiceNumber))
                     @php($documentUrl = route($invoice->type === 'CustCred' ? 'company.credit-memos.show' : 'company.invoices.show', [$this->snapshot->netsuite_company_id, $invoice->netsuite_id]))
 
-                    <flux:table.row wire:key="invoice-{{ $invoice->netsuite_id }}">
+                    <flux:table.row
+                        wire:key="invoice-{{ $invoice->netsuite_id }}"
+                        class="cursor-pointer transition-colors hover:bg-zinc-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:hover:bg-white/5"
+                        role="link"
+                        tabindex="0"
+                        data-href="{{ $documentUrl }}"
+                        aria-label="{{ $invoice->type === 'CustCred' ? __('View credit memo :number', ['number' => $invoiceNumber]) : __('View invoice :number', ['number' => $invoiceNumber]) }}"
+                        x-on:click="Livewire.navigate($el.dataset.href)"
+                        x-on:keydown.enter.prevent="Livewire.navigate($el.dataset.href)"
+                        x-on:keydown.space.prevent="Livewire.navigate($el.dataset.href)"
+                    >
                         <flux:table.cell class="w-40 font-medium">
                             <span class="block truncate" title="{{ $invoiceNumber }}">{{ $invoiceNumber }}</span>
                         </flux:table.cell>
@@ -386,7 +396,7 @@ new class extends Component {
                             </flux:badge>
                         </flux:table.cell>
                         <flux:table.cell>{{ Number::currency((float) $invoice->total, in: $this->currencyCode($invoice->currency)) }}</flux:table.cell>
-                        <flux:table.cell align="end" class="w-12 py-0">
+                        <flux:table.cell align="end" class="w-12 py-0" x-on:click.stop x-on:keydown.stop>
                             <flux:dropdown align="end">
                                 <flux:button variant="ghost" size="sm" icon="ellipsis-horizontal" aria-label="{{ __('Billing document actions') }}"></flux:button>
                                 <flux:menu>

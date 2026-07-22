@@ -370,10 +370,21 @@ new class extends Component {
                     @php($salesOrderNumber = $salesOrder->tranid ?: $salesOrder->netsuite_id)
                     @php($poNumber = $salesOrder->other_ref_num ?: '-')
                     @php($statusLabel = $this->transactionStatusLabel($salesOrder->type, $salesOrder->status))
+                    @php($documentUrl = route('company.sales-orders.show', [$this->snapshot->netsuite_company_id, $salesOrder->netsuite_id]))
                     @php($relatedInvoicesUrl = $this->relatedInvoicesUrl((int) $salesOrder->netsuite_id, (string) $salesOrderNumber))
                     @php($relatedCreditMemosUrl = $this->relatedCreditMemosUrl((int) $salesOrder->netsuite_id, (string) $salesOrderNumber))
 
-                    <flux:table.row wire:key="sales-order-{{ $salesOrder->netsuite_id }}">
+                    <flux:table.row
+                        wire:key="sales-order-{{ $salesOrder->netsuite_id }}"
+                        class="cursor-pointer transition-colors hover:bg-zinc-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 dark:hover:bg-white/5"
+                        role="link"
+                        tabindex="0"
+                        data-href="{{ $documentUrl }}"
+                        aria-label="{{ __('View sales order :number', ['number' => $salesOrderNumber]) }}"
+                        x-on:click="Livewire.navigate($el.dataset.href)"
+                        x-on:keydown.enter.prevent="Livewire.navigate($el.dataset.href)"
+                        x-on:keydown.space.prevent="Livewire.navigate($el.dataset.href)"
+                    >
                         <flux:table.cell class="w-36 font-medium">
                             <span class="block truncate" title="{{ $salesOrderNumber }}">{{ $salesOrderNumber }}</span>
                         </flux:table.cell>
@@ -387,7 +398,7 @@ new class extends Component {
                             </flux:badge>
                         </flux:table.cell>
                         <flux:table.cell>{{ Number::currency((float) $salesOrder->total, in: $this->currencyCode($salesOrder->currency)) }}</flux:table.cell>
-                        <flux:table.cell align="end" class="w-12 py-0">
+                        <flux:table.cell align="end" class="w-12 py-0" x-on:click.stop x-on:keydown.stop>
                             <flux:dropdown align="end">
                                 <flux:button variant="ghost" size="sm" icon="ellipsis-horizontal" aria-label="{{ __('Order actions') }}"></flux:button>
                                 <flux:menu>
@@ -395,7 +406,7 @@ new class extends Component {
                                         <flux:menu.item icon="document-text">{{ __('View Purchase Order') }}</flux:menu.item>
                                     @endcan
                                     @can('view order')
-                                        <flux:menu.item icon="document-magnifying-glass" :href="route('company.sales-orders.show', [$this->snapshot->netsuite_company_id, $salesOrder->netsuite_id])" wire:navigate>{{ __('View Sales Order') }}</flux:menu.item>
+                                        <flux:menu.item icon="document-magnifying-glass" :href="$documentUrl" wire:navigate>{{ __('View Sales Order') }}</flux:menu.item>
                                     @endcan
                                     @can('view invoice')
                                         @if ($relatedInvoicesUrl !== null)

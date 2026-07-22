@@ -176,8 +176,8 @@ new class extends Component {
     @php($shipToLines = $this->addressLines($transaction->shipping_address))
     @php($totals = $this->totals())
 
-    <div class="rounded-lg border border-zinc-200 bg-white p-4 text-sm shadow-sm dark:border-white/10 dark:bg-zinc-900 sm:p-6">
-        <div class="mb-6 flex flex-wrap items-start justify-between gap-4">
+    <div class="rounded-lg border border-zinc-200 bg-white p-4 text-sm shadow-sm dark:border-white/10 dark:bg-zinc-900">
+        <div class="mb-4 flex flex-wrap items-start justify-between gap-4">
             <div>
                 <div class="flex flex-wrap items-center gap-2">
                     <flux:heading size="xl">{{ $documentNumber }}</flux:heading>
@@ -194,23 +194,23 @@ new class extends Component {
             @endif
         </div>
 
-        <div class="grid gap-6 xl:grid-cols-5">
-            <div>
-                <div class="mb-2 text-xs font-semibold uppercase text-zinc-500 dark:text-zinc-400">{{ __('Bill To') }}</div>
-                <address class="space-y-0.5 not-italic leading-6 text-zinc-900 dark:text-zinc-100">
+        <div class="grid items-start gap-4 xl:grid-cols-[minmax(15rem,1.1fr)_minmax(15rem,1.1fr)_minmax(0.75rem,0.25fr)_minmax(10rem,0.85fr)_minmax(10rem,0.85fr)]">
+            <div class="min-w-0">
+                <div class="mb-1 text-xs font-semibold uppercase text-zinc-500 dark:text-zinc-400">{{ __('Bill To') }}</div>
+                <address class="space-y-px not-italic text-[13px] leading-5 text-zinc-900 dark:text-zinc-100">
                     @forelse ($billToLines as $line)
-                        <div>{{ $line }}</div>
+                        <div class="truncate" title="{{ $line }}">{{ $line }}</div>
                     @empty
                         <div class="text-zinc-500 dark:text-zinc-400">-</div>
                     @endforelse
                 </address>
             </div>
 
-            <div>
-                <div class="mb-2 text-xs font-semibold uppercase text-zinc-500 dark:text-zinc-400">{{ __('Ship To') }}</div>
-                <address class="space-y-0.5 not-italic leading-6 text-zinc-900 dark:text-zinc-100">
+            <div class="min-w-0">
+                <div class="mb-1 text-xs font-semibold uppercase text-zinc-500 dark:text-zinc-400">{{ __('Ship To') }}</div>
+                <address class="space-y-px not-italic text-[13px] leading-5 text-zinc-900 dark:text-zinc-100">
                     @forelse ($shipToLines as $line)
-                        <div>{{ $line }}</div>
+                        <div class="truncate" title="{{ $line }}">{{ $line }}</div>
                     @empty
                         <div class="text-zinc-500 dark:text-zinc-400">-</div>
                     @endforelse
@@ -219,45 +219,45 @@ new class extends Component {
 
             <div class="hidden xl:block"></div>
 
-            <div class="overflow-hidden rounded-md border border-zinc-200 xl:col-span-2 dark:border-white/10">
-                <div class="bg-zinc-950 px-3 py-1 text-center text-xs font-medium uppercase text-white">{{ __('Summary') }}</div>
+            <div class="self-start overflow-hidden rounded-md border border-zinc-200 xl:col-span-2 dark:border-white/10">
+                <div class="bg-zinc-950 px-2.5 py-0.5 text-center text-xs font-medium uppercase text-white">{{ __('Summary') }}</div>
 
                 <div class="grid grid-cols-3 divide-x divide-zinc-200 border-b border-zinc-200 bg-zinc-50 text-center dark:divide-white/10 dark:border-white/10 dark:bg-white/5">
-                    <div class="p-3">
+                    <div class="px-2.5 py-1.5">
                         <div class="text-xs text-zinc-500 dark:text-zinc-400">{{ __('Subtotal') }}</div>
-                        <div class="mt-1 text-base text-zinc-700 dark:text-zinc-200">{{ $this->formattedMoney($totals['subtotal']) }}</div>
+                        <div class="mt-0.5 text-sm text-zinc-700 dark:text-zinc-200">{{ $this->formattedMoney($totals['subtotal']) }}</div>
                     </div>
-                    <div class="p-3">
+                    <div class="px-2.5 py-1.5">
                         <div class="text-xs text-zinc-500 dark:text-zinc-400">{{ __('Freight') }}</div>
-                        <div class="mt-1 text-base text-zinc-700 dark:text-zinc-200">{{ $this->formattedMoney($totals['freight']) }}</div>
+                        <div class="mt-0.5 text-sm text-zinc-700 dark:text-zinc-200">{{ $this->formattedMoney($totals['freight']) }}</div>
                     </div>
-                    <div class="p-3">
+                    <div class="px-2.5 py-1.5">
                         <div class="text-xs text-zinc-500 dark:text-zinc-400">{{ __('Total') }}</div>
-                        <div class="mt-1 text-base text-zinc-700 dark:text-zinc-200">{{ $this->formattedMoney($totals['total']) }}</div>
+                        <div class="mt-0.5 text-sm text-zinc-700 dark:text-zinc-200">{{ $this->formattedMoney($totals['total']) }}</div>
                     </div>
                 </div>
 
                 @if ($totals['discount'] > 0)
-                    <div class="border-b border-zinc-200 bg-zinc-50 px-3 py-2 text-center dark:border-white/10 dark:bg-white/5">
+                    <div class="border-b border-zinc-200 bg-zinc-50 px-2.5 py-1.5 text-center dark:border-white/10 dark:bg-white/5">
                         <span class="text-xs text-zinc-500 dark:text-zinc-400">{{ __('Discount') }}</span>
                         <span class="ms-2 text-zinc-700 dark:text-zinc-200">-{{ $this->formattedMoney($totals['discount']) }}</span>
                     </div>
                 @endif
 
                 <div class="grid grid-cols-3 divide-x divide-zinc-200 bg-zinc-50 text-center dark:divide-white/10 dark:bg-white/5">
-                    <div class="p-3">
+                    <div class="px-2.5 py-1.5">
                         <div class="text-xs text-zinc-500 dark:text-zinc-400">{{ __('PO Number') }}</div>
-                        <div class="mt-1 text-base text-zinc-700 dark:text-zinc-200">{{ $transaction->other_ref_num ?: '-' }}</div>
+                        <div class="mt-0.5 text-sm text-zinc-700 dark:text-zinc-200">{{ $transaction->other_ref_num ?: '-' }}</div>
                     </div>
-                    <div class="col-span-2 p-3">
+                    <div class="col-span-2 px-2.5 py-1.5">
                         <div class="text-xs text-zinc-500 dark:text-zinc-400">{{ __('Memo') }}</div>
-                        <div class="mt-1 text-base text-zinc-700 dark:text-zinc-200">{{ $transaction->memo ?: '-' }}</div>
+                        <div class="mt-0.5 line-clamp-2 text-sm text-zinc-700 dark:text-zinc-200">{{ $transaction->memo ?: '-' }}</div>
                     </div>
                 </div>
             </div>
         </div>
 
-        <div class="mt-6 grid grid-cols-1 gap-y-4 border-y border-zinc-200 py-4 text-center sm:grid-cols-2 lg:grid-cols-7 dark:border-white/10">
+        <div class="mt-4 grid grid-cols-1 gap-y-3 border-y border-zinc-200 py-3 text-center sm:grid-cols-2 lg:grid-cols-7 dark:border-white/10">
             <div>
                 <div class="text-xs font-semibold uppercase text-zinc-500 dark:text-zinc-400">{{ $numberLabel }}</div>
                 <div class="mt-1 text-zinc-900 dark:text-zinc-100">{{ $documentNumber }}</div>
@@ -286,15 +286,15 @@ new class extends Component {
             </div>
         </div>
 
-        <div class="mt-6 overflow-x-auto">
-            <flux:table class="min-w-[760px]">
+        <div class="mt-4 overflow-x-auto">
+            <flux:table class="w-full min-w-[760px] table-fixed">
                 <flux:table.columns>
-                    <flux:table.column class="w-44">{{ __('Item No.') }}</flux:table.column>
+                    <flux:table.column class="w-40">{{ __('Item No.') }}</flux:table.column>
                     <flux:table.column>{{ __('Description') }}</flux:table.column>
-                    <flux:table.column align="end" class="w-20">{{ __('Qty') }}</flux:table.column>
-                    <flux:table.column align="end" class="w-20">{{ __('B/O') }}</flux:table.column>
-                    <flux:table.column align="end" class="w-28">{{ __('Price') }}</flux:table.column>
-                    <flux:table.column align="end" class="w-28">{{ __('Amount') }}</flux:table.column>
+                    <flux:table.column align="end" class="w-14">{{ __('Qty') }}</flux:table.column>
+                    <flux:table.column align="end" class="w-14">{{ __('B/O') }}</flux:table.column>
+                    <flux:table.column align="end" class="w-24">{{ __('Price') }}</flux:table.column>
+                    <flux:table.column align="end" class="w-24">{{ __('Amount') }}</flux:table.column>
                 </flux:table.columns>
 
                 <flux:table.rows>
