@@ -5,6 +5,7 @@ namespace App\Services\CompanySnapshots;
 use App\Jobs\RefreshCompanySnapshotSummary;
 use App\Jobs\SyncCompanySnapshotMeta;
 use App\Jobs\SyncCompanySnapshotTransaction;
+use App\Jobs\SyncCompanySnapshotTransactionBatch;
 use App\Jobs\SyncCompanySnapshotTransactions;
 use App\Models\CompanySnapshot;
 use App\Models\CompanySummary;
@@ -83,6 +84,22 @@ class CompanySnapshotSyncer
     public function queueTransactionRefresh(CompanySnapshot $snapshot, int $netsuiteTransactionId): void
     {
         $pendingDispatch = SyncCompanySnapshotTransaction::dispatch($snapshot->id, $netsuiteTransactionId);
+
+        if (! app()->runningInConsole()) {
+            $pendingDispatch->afterResponse();
+        }
+    }
+
+    /**
+     * @param  array<int, int>  $netsuiteTransactionIds
+     */
+    public function queueTransactionBatchRefresh(CompanySnapshot $snapshot, array $netsuiteTransactionIds, bool $queueFollowUpRefresh = false): void
+    {
+        $pendingDispatch = SyncCompanySnapshotTransactionBatch::dispatch(
+            $snapshot->id,
+            $this->normalizeTransactionIds($netsuiteTransactionIds),
+            $queueFollowUpRefresh,
+        );
 
         if (! app()->runningInConsole()) {
             $pendingDispatch->afterResponse();
@@ -263,6 +280,73 @@ class CompanySnapshotSyncer
                 'link_count' => count($links),
                 'tracking_number_count' => count($trackingNumbers),
             ], $transaction['last_modified_at'] ?? null);
+
+            $snapshot->forceFill([
+                'status' => CompanySnapshot::STATUS_ACTIVE,
+                'sync_finished_at' => now(),
+                'last_error' => null,
+            ])->save();
+
+            return $snapshot->refresh();
+        } catch (Throwable $exception) {
+            $this->markFailed($snapshot, $exception);
+
+            throw $exception;
+        }
+    }
+
+    /**
+     * @param  array<int, int>  $netsuiteTransactionIds
+     */
+    public function syncTransactionsByIds(CompanySnapshot $snapshot, array $netsuiteTransactionIds): CompanySnapshot
+    {
+        $netsuiteTransactionIds = $this->normalizeTransactionIds($netsuiteTransactionIds);
+
+        if ($netsuiteTransactionIds === []) {
+            return $snapshot->refresh();
+        }
+
+        try {
+            $snapshot->forceFill([
+                'status' => CompanySnapshot::STATUS_SYNCING_TRANSACTIONS,
+                'sync_started_at' => now(),
+                'last_error' => null,
+            ])->save();
+
+            $this->databaseManager->ensureDatabase($snapshot);
+
+            $transactions = $this->netSuite->fetchTransactionsByIds($snapshot->netsuite_company_id, $netsuiteTransactionIds);
+
+            if ($transactions === []) {
+                throw new RuntimeException('No requested transactions were found for company '.$snapshot->netsuite_company_id.'.');
+            }
+
+            $syncedTransactionIds = collect($transactions)
+                ->pluck('netsuite_id')
+                ->map(fn (mixed $id): int => (int) $id)
+                ->all();
+
+            $lines = $this->netSuite->fetchTransactionLinesForTransactions($snapshot->netsuite_company_id, $syncedTransactionIds);
+            $links = $this->netSuite->fetchTransactionLinksForTransactions($snapshot->netsuite_company_id, $syncedTransactionIds);
+            $trackingNumbers = $this->netSuite->fetchTransactionTrackingNumbersForTransactions(
+                $snapshot->netsuite_company_id,
+                $this->trackingTransactionIdsForTransactions($transactions, $links),
+            );
+
+            $this->writeTransactions($snapshot, $transactions);
+            $this->writeTransactionLines($snapshot, $lines);
+            $this->writeTransactionLinks($snapshot, $links);
+            $this->writeTransactionTrackingNumbers($snapshot, $trackingNumbers);
+
+            $this->writeSyncState($snapshot, 'transactions:targeted-batch', [
+                'mode' => 'targeted-batch',
+                'requested_transaction_ids' => $netsuiteTransactionIds,
+                'synced_transaction_ids' => $syncedTransactionIds,
+                'transaction_count' => count($transactions),
+                'line_count' => count($lines),
+                'link_count' => count($links),
+                'tracking_number_count' => count($trackingNumbers),
+            ], $this->latestLastModifiedAtFromTransactions($transactions));
 
             $snapshot->forceFill([
                 'status' => CompanySnapshot::STATUS_ACTIVE,
@@ -535,6 +619,59 @@ class CompanySnapshotSyncer
         }
 
         return collect($ids)
+            ->filter(fn (int $id): bool => $id > 0)
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $transactions
+     * @param  array<int, array<string, mixed>>  $links
+     * @return array<int, int>
+     */
+    private function trackingTransactionIdsForTransactions(array $transactions, array $links): array
+    {
+        $ids = collect($transactions)
+            ->filter(fn (array $transaction): bool => ($transaction['type'] ?? null) === 'ItemShip')
+            ->pluck('netsuite_id')
+            ->map(fn (mixed $id): int => (int) $id)
+            ->all();
+
+        foreach ($links as $link) {
+            if (($link['previous_transaction_type'] ?? null) === 'ItemShip') {
+                $ids[] = (int) $link['previous_transaction_netsuite_id'];
+            }
+
+            if (($link['next_transaction_type'] ?? null) === 'ItemShip') {
+                $ids[] = (int) $link['next_transaction_netsuite_id'];
+            }
+        }
+
+        return $this->normalizeTransactionIds($ids);
+    }
+
+    /**
+     * @param  array<int, array<string, mixed>>  $transactions
+     */
+    private function latestLastModifiedAtFromTransactions(array $transactions): ?string
+    {
+        return collect($transactions)
+            ->pluck('last_modified_at')
+            ->filter()
+            ->map(fn (mixed $lastModifiedAt): ?string => $this->normalizeDateTimeString($lastModifiedAt))
+            ->filter()
+            ->max();
+    }
+
+    /**
+     * @param  array<int, int>  $ids
+     * @return array<int, int>
+     */
+    private function normalizeTransactionIds(array $ids): array
+    {
+        return collect($ids)
+            ->map(fn (mixed $id): int => (int) $id)
             ->filter(fn (int $id): bool => $id > 0)
             ->unique()
             ->values()

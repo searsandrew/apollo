@@ -124,6 +124,24 @@ class NetSuiteCompanySnapshotRepository
      */
     public function fetchTransaction(int $netsuiteCompanyId, int $netsuiteTransactionId): ?array
     {
+        return collect($this->fetchTransactionsByIds($netsuiteCompanyId, [$netsuiteTransactionId]))
+            ->firstWhere('netsuite_id', $netsuiteTransactionId);
+    }
+
+    /**
+     * @param  array<int, int>  $netsuiteTransactionIds
+     * @return array<int, array<string, mixed>>
+     */
+    public function fetchTransactionsByIds(int $netsuiteCompanyId, array $netsuiteTransactionIds): array
+    {
+        $netsuiteTransactionIds = $this->sanitizeIds($netsuiteTransactionIds);
+
+        if ($netsuiteTransactionIds === []) {
+            return [];
+        }
+
+        $transactionIdList = implode(', ', $netsuiteTransactionIds);
+
         $sql = <<<SQL
             SELECT
                 id,
@@ -146,21 +164,25 @@ class NetSuiteCompanySnapshotRepository
                 lastmodifieddate
             FROM transaction
             WHERE entity = {$netsuiteCompanyId}
-            AND id = {$netsuiteTransactionId}
+            AND id IN ({$transactionIdList})
         SQL;
 
         $page = $this->briarRose->rest()->suiteql()->query($sql, [
-            'limit' => 1,
+            'limit' => 1000,
             'offset' => 0,
         ])->throw()->json();
 
-        $transaction = $page['items'][0] ?? null;
+        $transactions = [];
 
-        if (! is_array($transaction)) {
-            return null;
+        foreach ($page['items'] ?? [] as $transaction) {
+            if (! is_array($transaction)) {
+                continue;
+            }
+
+            $transactions[] = $this->mapTransactionRow($transaction);
         }
 
-        return $this->mapTransactionRow($transaction);
+        return $transactions;
     }
 
     /**
@@ -224,6 +246,23 @@ class NetSuiteCompanySnapshotRepository
      */
     public function fetchTransactionLines(int $netsuiteCompanyId, int $netsuiteTransactionId): array
     {
+        return $this->fetchTransactionLinesForTransactions($netsuiteCompanyId, [$netsuiteTransactionId]);
+    }
+
+    /**
+     * @param  array<int, int>  $netsuiteTransactionIds
+     * @return array<int, array<string, mixed>>
+     */
+    public function fetchTransactionLinesForTransactions(int $netsuiteCompanyId, array $netsuiteTransactionIds): array
+    {
+        $netsuiteTransactionIds = $this->sanitizeIds($netsuiteTransactionIds);
+
+        if ($netsuiteTransactionIds === []) {
+            return [];
+        }
+
+        $transactionIdList = implode(', ', $netsuiteTransactionIds);
+
         $sql = <<<SQL
             SELECT
                 transactionline.transaction AS transaction_id,
@@ -244,8 +283,8 @@ class NetSuiteCompanySnapshotRepository
             LEFT JOIN item ON item.id = transactionline.item
             JOIN transaction ON transaction.id = transactionline.transaction
             WHERE transaction.entity = {$netsuiteCompanyId}
-            AND transactionline.transaction = {$netsuiteTransactionId}
-            ORDER BY transactionline.id
+            AND transactionline.transaction IN ({$transactionIdList})
+            ORDER BY transactionline.transaction, transactionline.id
         SQL;
 
         $page = $this->briarRose->rest()->suiteql()->query($sql, [
@@ -320,12 +359,7 @@ class NetSuiteCompanySnapshotRepository
      */
     public function fetchTransactionTrackingNumbersForTransactions(int $netsuiteCompanyId, array $netsuiteTransactionIds): array
     {
-        $netsuiteTransactionIds = collect($netsuiteTransactionIds)
-            ->map(fn (mixed $id): int => (int) $id)
-            ->filter(fn (int $id): bool => $id > 0)
-            ->unique()
-            ->values()
-            ->all();
+        $netsuiteTransactionIds = $this->sanitizeIds($netsuiteTransactionIds);
 
         if ($netsuiteTransactionIds === []) {
             return [];
@@ -425,6 +459,23 @@ class NetSuiteCompanySnapshotRepository
      */
     public function fetchTransactionLinksForTransaction(int $netsuiteCompanyId, int $netsuiteTransactionId): array
     {
+        return $this->fetchTransactionLinksForTransactions($netsuiteCompanyId, [$netsuiteTransactionId]);
+    }
+
+    /**
+     * @param  array<int, int>  $netsuiteTransactionIds
+     * @return array<int, array<string, mixed>>
+     */
+    public function fetchTransactionLinksForTransactions(int $netsuiteCompanyId, array $netsuiteTransactionIds): array
+    {
+        $netsuiteTransactionIds = $this->sanitizeIds($netsuiteTransactionIds);
+
+        if ($netsuiteTransactionIds === []) {
+            return [];
+        }
+
+        $transactionIdList = implode(', ', $netsuiteTransactionIds);
+
         $sql = <<<SQL
             SELECT
                 nextTransactionLineLink.previousDoc AS previous_doc,
@@ -442,7 +493,7 @@ class NetSuiteCompanySnapshotRepository
             JOIN transaction previousTransaction ON previousTransaction.id = nextTransactionLineLink.previousDoc
             JOIN transaction nextTransaction ON nextTransaction.id = nextTransactionLineLink.nextDoc
             WHERE (previousTransaction.entity = {$netsuiteCompanyId} OR nextTransaction.entity = {$netsuiteCompanyId})
-            AND (nextTransactionLineLink.previousDoc = {$netsuiteTransactionId} OR nextTransactionLineLink.nextDoc = {$netsuiteTransactionId})
+            AND (nextTransactionLineLink.previousDoc IN ({$transactionIdList}) OR nextTransactionLineLink.nextDoc IN ({$transactionIdList}))
             ORDER BY previousTransaction.trandate DESC, previousTransaction.id DESC, nextTransaction.id DESC, nextTransactionLineLink.previousLine, nextTransactionLineLink.nextLine
         SQL;
 
@@ -557,6 +608,20 @@ class NetSuiteCompanySnapshotRepository
             'link_type' => $this->nullableString($link['link_type'] ?? null),
             'raw_payload' => $link,
         ];
+    }
+
+    /**
+     * @param  array<int, int>  $ids
+     * @return array<int, int>
+     */
+    private function sanitizeIds(array $ids): array
+    {
+        return collect($ids)
+            ->map(fn (mixed $id): int => (int) $id)
+            ->filter(fn (int $id): bool => $id > 0)
+            ->unique()
+            ->values()
+            ->all();
     }
 
     private function nullableString(mixed $value): ?string

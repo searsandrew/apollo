@@ -31,6 +31,8 @@ new class extends Component {
 
     public string $source = '';
 
+    public ?string $visibleRefreshRequestedAt = null;
+
     private CompanySnapshotInvoiceRepository $invoiceRepository;
 
     private CompanySnapshotTransactionRelationshipRepository $relationshipRepository;
@@ -85,22 +87,10 @@ new class extends Component {
     public function shouldPoll(): bool
     {
         return $this->snapshot->transactions_synced_at === null
+            || $this->visibleRefreshRequestedAt !== null
             || $this->isSyncing()
             || $this->snapshot->isMetaStale()
             || $this->snapshot->areTransactionsStale(self::TRANSACTION_STALE_DAYS);
-    }
-
-    public function syncActivityLabel(): ?string
-    {
-        if ($this->isSyncing()) {
-            return __('Refreshing data');
-        }
-
-        if ($this->shouldPoll) {
-            return __('Checking for updates');
-        }
-
-        return null;
     }
 
     public function syncStartedAt(): ?CarbonInterface
@@ -114,7 +104,12 @@ new class extends Component {
 
     public function refreshSyncState(): void
     {
-        unset($this->snapshot, $this->invoices);
+        $this->clearTransactionMemo();
+        $this->resolveVisibleRefreshState();
+
+        if ($this->visibleRefreshRequestedAt !== null) {
+            return;
+        }
 
         if (! $this->shouldPoll || $this->isSyncing()) {
             return;
@@ -128,6 +123,31 @@ new class extends Component {
             $this->snapshot,
             transactionStaleDays: self::TRANSACTION_STALE_DAYS,
         );
+    }
+
+    public function refreshVisibleRecords(): void
+    {
+        $invoices = $this->invoices;
+        $transactionIds = $this->visibleTransactionIds();
+
+        if ($transactionIds === []) {
+            return;
+        }
+
+        $this->visibleRefreshRequestedAt = now()->toIso8601String();
+
+        $this->snapshotSyncer->queueTransactionBatchRefresh(
+            $this->snapshot,
+            $transactionIds,
+            queueFollowUpRefresh: $invoices->total() > count($transactionIds),
+        );
+
+        $this->clearTransactionMemo();
+    }
+
+    public function isRefreshingVisibleRecords(): bool
+    {
+        return $this->visibleRefreshRequestedAt !== null || $this->isTransactionSyncing();
     }
 
     public function isSyncing(): bool
@@ -252,6 +272,55 @@ new class extends Component {
     {
         return 'company-snapshot:refresh-queued:'.$this->snapshotId;
     }
+
+    private function isTransactionSyncing(): bool
+    {
+        return $this->snapshot->status === CompanySnapshot::STATUS_SYNCING_TRANSACTIONS;
+    }
+
+    private function resolveVisibleRefreshState(): void
+    {
+        if ($this->visibleRefreshRequestedAt === null) {
+            return;
+        }
+
+        $requestedAt = Carbon::parse($this->visibleRefreshRequestedAt);
+
+        if ($requestedAt->lt(now()->subMinutes(10))) {
+            $this->visibleRefreshRequestedAt = null;
+
+            return;
+        }
+
+        if ($this->isSyncing()) {
+            return;
+        }
+
+        $visibleRows = collect($this->invoices->items());
+
+        if ($visibleRows->isNotEmpty() && $visibleRows->every(fn (object $transaction): bool => filled($transaction->synced_at) && Carbon::parse((string) $transaction->synced_at)->gte($requestedAt))) {
+            $this->visibleRefreshRequestedAt = null;
+        }
+    }
+
+    /**
+     * @return array<int, int>
+     */
+    private function visibleTransactionIds(): array
+    {
+        return collect($this->invoices->items())
+            ->pluck('netsuite_id')
+            ->map(fn (mixed $id): int => (int) $id)
+            ->filter(fn (int $id): bool => $id > 0)
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    private function clearTransactionMemo(): void
+    {
+        unset($this->snapshot, $this->invoices);
+    }
 };
 ?>
 
@@ -263,32 +332,33 @@ new class extends Component {
         </div>
 
         <div class="flex shrink-0 flex-col items-end gap-1">
-            @if ($this->syncActivityLabel())
-                <flux:badge size="sm" color="sky">
-                    <span class="inline-flex items-center gap-1.5">
-                        <flux:icon.loading class="size-3" />
-                        <span wire:loading.remove>{{ $this->syncActivityLabel() }}</span>
-                        <span wire:loading>{{ __('Checking now') }}</span>
-                    </span>
-                </flux:badge>
-            @endif
-
             @php($transactionsSyncedAt = $this->snapshot->transactions_synced_at)
+            @php($isRefreshingVisibleRecords = $this->isRefreshingVisibleRecords())
 
             @if ($transactionsSyncedAt !== null)
-                <small
-                    wire:key="invoices-synced-at-{{ $transactionsSyncedAt->getTimestamp() }}"
-                    class="italic text-zinc-600 dark:text-zinc-400"
-                    aria-live="polite"
-                    x-data="relativeTime({
-                        timestamp: @js($transactionsSyncedAt->toIso8601String()),
-                        fallback: @js($transactionsSyncedAt->diffForHumans()),
-                    })"
-                >
-                    {{ __('Last synced') }} <span x-text="label">{{ $transactionsSyncedAt->diffForHumans() }}</span>
-                </small>
+                @if ($isRefreshingVisibleRecords)
+                    <span class="animate-pulse text-[11px] text-zinc-500 dark:text-zinc-400">{{ __('Refreshing records') }}</span>
+                @else
+                    <button
+                        type="button"
+                        wire:key="invoices-synced-at-{{ $transactionsSyncedAt->getTimestamp() }}"
+                        wire:click="refreshVisibleRecords"
+                        wire:loading.attr="disabled"
+                        wire:target="refreshVisibleRecords"
+                        class="cursor-pointer text-xs text-zinc-500 underline-offset-4 hover:text-zinc-800 hover:underline disabled:cursor-wait disabled:opacity-70 dark:text-zinc-400 dark:hover:text-zinc-100"
+                        title="{{ __('Refresh visible records from the data source') }}"
+                        aria-live="polite"
+                        x-data="relativeTime({
+                            timestamp: @js($transactionsSyncedAt->toIso8601String()),
+                            fallback: @js($transactionsSyncedAt->diffForHumans()),
+                        })"
+                    >
+                        <span wire:loading.remove wire:target="refreshVisibleRecords">{{ __('Synced') }} <span x-text="label">{{ $transactionsSyncedAt->diffForHumans() }}</span></span>
+                        <span wire:loading wire:target="refreshVisibleRecords">{{ __('Queueing refresh') }}</span>
+                    </button>
+                @endif
             @else
-                <small class="italic text-zinc-600 dark:text-zinc-400">{{ __('Waiting for first sync') }}</small>
+                <small class="text-xs text-zinc-500 dark:text-zinc-400">{{ __('Waiting for first sync') }}</small>
             @endif
         </div>
     </div>

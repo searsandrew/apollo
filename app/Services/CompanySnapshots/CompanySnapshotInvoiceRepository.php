@@ -8,7 +8,7 @@ use Illuminate\Database\Query\Builder;
 
 class CompanySnapshotInvoiceRepository
 {
-    public const int DEFAULT_PER_PAGE = 12;
+    public const int DEFAULT_PER_PAGE = 25;
 
     public const string PAGE_NAME = 'invoices-page';
 

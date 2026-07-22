@@ -1,12 +1,14 @@
 <?php
 
 use App\Jobs\SyncCompanySnapshotMeta;
+use App\Jobs\SyncCompanySnapshotTransactionBatch;
 use App\Jobs\SyncCompanySnapshotTransactions;
 use App\Models\CompanySnapshot;
 use App\Models\User;
 use App\Services\CompanySnapshots\CompanySnapshotDatabaseManager;
 use App\Services\CompanySnapshots\CompanySnapshotInvoiceRepository;
 use Illuminate\Contracts\Pagination\LengthAwarePaginator;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Queue;
@@ -457,7 +459,7 @@ it('links invoice actions to filtered sales order table results', function (): v
         ->assertSee('source=INV1001', false);
 });
 
-it('renders the invoice last synced timestamp as a client-side relative timer', function (): void {
+it('renders the invoice synced timestamp as a clickable client-side relative timer', function (): void {
     $syncedAt = now()->subSeconds(30)->startOfSecond();
 
     $snapshot = CompanySnapshot::factory()->create([
@@ -471,16 +473,73 @@ it('renders the invoice last synced timestamp as a client-side relative timer', 
     app(CompanySnapshotDatabaseManager::class)->ensureDatabase($snapshot);
 
     Livewire::test('components::company-invoices-table', ['snapshotId' => $snapshot->id])
-        ->assertSee('Last synced')
+        ->assertSee('Synced')
         ->assertSee("invoices-synced-at-{$syncedAt->getTimestamp()}", false)
+        ->assertSee('refreshVisibleRecords', false)
+        ->assertSeeHtml('text-xs')
+        ->assertSeeHtml('cursor-pointer')
         ->assertSee('x-data="relativeTime', false)
         ->assertSee($syncedAt->toIso8601String(), false)
+        ->assertDontSee('Last synced')
         ->assertDontSee('setTimeout', false)
         ->assertDontSee('elapsedSeconds', false)
         ->assertDontSee('wire:poll.visible.5s', false);
 });
 
-it('shows when stale invoice data is checking for updates', function (): void {
+it('queues the visible invoices for targeted refresh before a follow-up transaction refresh', function (): void {
+    Queue::fake();
+
+    $snapshot = CompanySnapshot::factory()->create([
+        'netsuite_company_id' => 286,
+        'status' => CompanySnapshot::STATUS_ACTIVE,
+        'meta_synced_at' => now(),
+        'transactions_synced_at' => now()->subDays(2),
+        'summary_synced_at' => now()->subDays(2),
+    ]);
+
+    $connection = app(CompanySnapshotDatabaseManager::class)->ensureDatabase($snapshot);
+    $now = now()->subDays(2);
+
+    $connection->table('transactions')->insert(
+        collect(range(1, 26))->map(fn (int $index): array => [
+            'netsuite_id' => 8000 + $index,
+            'tranid' => 'INV'.str_pad((string) $index, 4, '0', STR_PAD_LEFT),
+            'other_ref_num' => 'PO-'.str_pad((string) $index, 4, '0', STR_PAD_LEFT),
+            'type' => 'CustInvc',
+            'status' => 'A',
+            'trandate' => Carbon::parse('2026-01-01')->addDays($index)->toDateString(),
+            'total' => '1250.50',
+            'foreign_total' => '1250.50',
+            'currency' => 'USD',
+            'memo' => 'Invoice',
+            'last_modified_at' => Carbon::parse('2026-01-01 12:00:00')->addDays($index)->toDateTimeString(),
+            'raw_payload' => '{}',
+            'synced_at' => $now,
+            'created_at' => $now,
+            'updated_at' => $now,
+        ])->all(),
+    );
+
+    Livewire::test('components::company-invoices-table', ['snapshotId' => $snapshot->id])
+        ->call('refreshVisibleRecords')
+        ->call('refreshSyncState')
+        ->assertSee('Refreshing records')
+        ->assertSeeHtml('animate-pulse')
+        ->assertDontSee('Synced');
+
+    Queue::assertPushed(
+        SyncCompanySnapshotTransactionBatch::class,
+        fn (SyncCompanySnapshotTransactionBatch $job): bool => $job->companySnapshotId === $snapshot->id
+            && $job->queueFollowUpRefresh === true
+            && count($job->netsuiteTransactionIds) === 25
+            && $job->netsuiteTransactionIds[0] === 8026
+            && $job->netsuiteTransactionIds[24] === 8002,
+    );
+
+    Queue::assertNotPushed(SyncCompanySnapshotTransactions::class);
+});
+
+it('keeps the invoice synced control visible while stale data polls', function (): void {
     $snapshot = CompanySnapshot::factory()->create([
         'netsuite_company_id' => 286,
         'status' => CompanySnapshot::STATUS_ACTIVE,
@@ -510,9 +569,10 @@ it('shows when stale invoice data is checking for updates', function (): void {
     ]);
 
     Livewire::test('components::company-invoices-table', ['snapshotId' => $snapshot->id])
-        ->assertSee('Checking for updates')
-        ->assertSee('Checking now')
-        ->assertSee('Last synced')
+        ->assertSee('Synced')
+        ->assertSee('refreshVisibleRecords', false)
+        ->assertDontSee('Checking for updates')
+        ->assertDontSee('Last synced')
         ->assertSee('wire:poll.visible.5s', false);
 });
 
