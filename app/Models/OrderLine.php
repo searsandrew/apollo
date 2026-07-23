@@ -13,7 +13,12 @@ use OwenIt\Auditing\Contracts\Auditable as AuditableContract;
 
 #[Fillable([
     'order_id',
+    'catalog_item_id',
     'part_number',
+    'resolved_part_number',
+    'resolution_status',
+    'resolution_type',
+    'resolved_at',
     'description',
     'notes',
     'quantity',
@@ -35,7 +40,12 @@ class OrderLine extends Model implements AuditableContract
      */
     protected $auditInclude = [
         'order_id',
+        'catalog_item_id',
         'part_number',
+        'resolved_part_number',
+        'resolution_status',
+        'resolution_type',
+        'resolved_at',
         'description',
         'notes',
         'quantity',
@@ -53,17 +63,24 @@ class OrderLine extends Model implements AuditableContract
     {
         return [
             'order_id' => 'integer',
+            'catalog_item_id' => 'integer',
             'quantity' => 'integer',
             'unit_price' => 'decimal:2',
             'amount' => 'decimal:2',
             'netsuite_item_id' => 'integer',
             'position' => 'integer',
+            'resolved_at' => 'datetime',
         ];
     }
 
     public function order(): BelongsTo
     {
         return $this->belongsTo(Order::class);
+    }
+
+    public function catalogItem(): BelongsTo
+    {
+        return $this->belongsTo(CatalogItem::class);
     }
 
     /**

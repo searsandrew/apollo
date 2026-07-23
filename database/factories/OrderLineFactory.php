@@ -20,7 +20,12 @@ class OrderLineFactory extends Factory
     {
         return [
             'order_id' => Order::factory(),
+            'catalog_item_id' => null,
             'part_number' => fake()->bothify('??###??'),
+            'resolved_part_number' => null,
+            'resolution_status' => 'unresolved',
+            'resolution_type' => null,
+            'resolved_at' => null,
             'description' => fake()->words(3, true),
             'quantity' => fake()->numberBetween(1, 12),
             'unit_price' => null,
