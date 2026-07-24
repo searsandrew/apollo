@@ -98,13 +98,19 @@ class CatalogSyncer
         }
 
         $netsuiteItemId = $this->nullableInt($payload['netsuite_item_id'] ?? null);
-        $isInactive = (bool) ($payload['is_inactive'] ?? false);
-        $isDiscontinued = (bool) ($payload['is_discontinued'] ?? false);
-        $status = $this->statusFromPayload($payload, $isInactive, $isDiscontinued);
         $item = CatalogItem::query()
-            ->when($netsuiteItemId !== null, fn ($query) => $query->where('netsuite_item_id', $netsuiteItemId))
-            ->orWhere('normalized_item_number', $normalizedItemNumber)
+            ->withTrashed()
+            ->where(function ($query) use ($netsuiteItemId, $normalizedItemNumber): void {
+                $query->where('normalized_item_number', $normalizedItemNumber);
+
+                if ($netsuiteItemId !== null) {
+                    $query->orWhere('netsuite_item_id', $netsuiteItemId);
+                }
+            })
             ->first() ?? new CatalogItem;
+        $isInactive = $this->booleanFromPayload($payload, 'is_inactive', (bool) $item->is_inactive);
+        $isDiscontinued = $this->booleanFromPayload($payload, 'is_discontinued', (bool) $item->is_discontinued);
+        $isOnline = $this->booleanFromPayload($payload, 'is_online', (bool) $item->is_online);
 
         $item->forceFill([
             'netsuite_item_id' => $netsuiteItemId,
@@ -112,15 +118,23 @@ class CatalogSyncer
             'normalized_item_number' => $normalizedItemNumber,
             'display_name' => $this->nullableString($payload['display_name'] ?? null),
             'description' => $this->nullableString($payload['description'] ?? null),
-            'status' => $status,
             'is_inactive' => $isInactive,
             'is_discontinued' => $isDiscontinued,
+            'is_online' => $isOnline,
             'multiple' => $this->nullableInt($payload['multiple'] ?? null),
             'available_quantity' => $this->nullableInt($payload['available_quantity'] ?? null),
             'availability_status' => $this->nullableString($payload['availability_status'] ?? null),
             'last_synced_at' => $syncedAt,
             'raw_payload' => $payload['raw_payload'] ?? $payload,
         ])->save();
+
+        if ($item->is_online && ! $item->is_inactive) {
+            if ($item->trashed()) {
+                $item->restore();
+            }
+        } elseif (! $item->trashed()) {
+            $item->delete();
+        }
 
         return $item;
     }
@@ -275,23 +289,13 @@ class CatalogSyncer
     /**
      * @param  array<string, mixed>  $payload
      */
-    private function statusFromPayload(array $payload, bool $isInactive, bool $isDiscontinued): string
+    private function booleanFromPayload(array $payload, string $key, bool $default = false): bool
     {
-        $status = $this->nullableString($payload['status'] ?? null);
-
-        if ($status !== null) {
-            return $status;
+        if (! array_key_exists($key, $payload)) {
+            return $default;
         }
 
-        if ($isInactive) {
-            return CatalogItem::STATUS_INACTIVE;
-        }
-
-        if ($isDiscontinued) {
-            return CatalogItem::STATUS_DISCONTINUED;
-        }
-
-        return CatalogItem::STATUS_ACTIVE;
+        return in_array(strtoupper((string) $payload[$key]), ['T', 'TRUE', '1', 'Y', 'YES'], true);
     }
 
     private function nullableString(mixed $value): ?string

@@ -13,6 +13,7 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Facades\Schema;
 use Searsandrew\BriarRose\BriarRoseManager;
 
 beforeEach(function (): void {
@@ -37,9 +38,9 @@ it('syncs catalog items with aliases and prices into local tables', function ():
             'item_number' => 'WB31X5013CM',
             'display_name' => '6 inch ring',
             'description' => '6" Ring',
-            'status' => CatalogItem::STATUS_ACTIVE,
             'is_inactive' => false,
             'is_discontinued' => false,
+            'is_online' => true,
             'multiple' => 1,
             'available_quantity' => 42,
             'availability_status' => 'in_stock',
@@ -70,14 +71,18 @@ it('syncs catalog items with aliases and prices into local tables', function ():
 
     $item = CatalogItem::query()->firstWhere('item_number', 'WB31X5013CM');
 
-    expect($counts)->toBe([
-        'items_seen' => 2,
-        'items_upserted' => 1,
-        'aliases_upserted' => 2,
-        'prices_upserted' => 1,
-    ])
+    expect(Schema::hasColumn('catalog_items', 'custitem6'))->toBeFalse()
+        ->and(Schema::hasColumn('catalog_items', 'status'))->toBeFalse()
+        ->and($counts)->toBe([
+            'items_seen' => 2,
+            'items_upserted' => 1,
+            'aliases_upserted' => 2,
+            'prices_upserted' => 1,
+        ])
         ->and($item)->toBeInstanceOf(CatalogItem::class)
         ->and($item?->normalized_item_number)->toBe('WB31X5013CM')
+        ->and($item?->is_online)->toBeTrue()
+        ->and($item?->trashed())->toBeFalse()
         ->and($item?->available_quantity)->toBe(42)
         ->and($item?->aliases()->where('normalized_alias', 'DW4001')->exists())->toBeTrue()
         ->and($item?->prices()->first()?->price)->toBe('3.59')
@@ -108,6 +113,44 @@ it('syncs catalog items with aliases and prices into local tables', function ():
         ->and(CatalogItemPrice::query()->first()?->price)->toBe('4.25');
 });
 
+it('soft deletes catalog items that are no longer available online and restores them when they return', function (): void {
+    app(CatalogSyncer::class)->syncPage([
+        [
+            'netsuite_item_id' => 789,
+            'item_number' => 'ONLINE123',
+            'is_online' => true,
+        ],
+    ]);
+
+    $item = CatalogItem::query()->firstWhere('item_number', 'ONLINE123');
+
+    expect($item)->toBeInstanceOf(CatalogItem::class)
+        ->and($item?->isAvailableOnline())->toBeTrue();
+
+    app(CatalogSyncer::class)->syncPage([
+        [
+            'netsuite_item_id' => 789,
+            'item_number' => 'ONLINE123',
+            'is_online' => false,
+        ],
+    ]);
+
+    expect(CatalogItem::query()->where('item_number', 'ONLINE123')->exists())->toBeFalse()
+        ->and(CatalogItem::withTrashed()->firstWhere('item_number', 'ONLINE123')?->trashed())->toBeTrue()
+        ->and(app(CatalogItemResolver::class)->resolve('ONLINE123'))->toBeNull();
+
+    app(CatalogSyncer::class)->syncPage([
+        [
+            'netsuite_item_id' => 789,
+            'item_number' => 'ONLINE123',
+            'is_online' => true,
+        ],
+    ]);
+
+    expect(CatalogItem::query()->firstWhere('item_number', 'ONLINE123'))->toBeInstanceOf(CatalogItem::class)
+        ->and(CatalogItem::query()->firstWhere('item_number', 'ONLINE123')?->trashed())->toBeFalse();
+});
+
 it('resolves typed part numbers by normalized item number or alias', function (): void {
     $activeItem = CatalogItem::factory()->create([
         'item_number' => 'WB31X5013CM',
@@ -123,14 +166,18 @@ it('resolves typed part numbers by normalized item number or alias', function ()
     CatalogItem::factory()->create([
         'item_number' => 'OLDPART',
         'normalized_item_number' => 'OLDPART',
-        'status' => CatalogItem::STATUS_INACTIVE,
         'is_inactive' => true,
+        'is_online' => false,
     ]);
     $discontinuedItem = CatalogItem::factory()->create([
         'item_number' => 'NLA123',
         'normalized_item_number' => 'NLA123',
-        'status' => CatalogItem::STATUS_DISCONTINUED,
         'is_discontinued' => true,
+    ]);
+    $hiddenItem = CatalogItem::factory()->create([
+        'item_number' => 'HIDDEN123',
+        'normalized_item_number' => 'HIDDEN123',
+        'is_online' => false,
     ]);
 
     $resolver = app(CatalogItemResolver::class);
@@ -138,7 +185,9 @@ it('resolves typed part numbers by normalized item number or alias', function ()
     expect($resolver->resolve(' wb31-x5013cm ')['item']->is($activeItem))->toBeTrue()
         ->and($resolver->resolve('dw-4001')['matched_by'])->toBe(CatalogItemAlias::TYPE_CROSS_REFERENCE)
         ->and($resolver->resolve('OLDPART'))->toBeNull()
-        ->and($resolver->resolve('OLDPART', null)['item']->item_number)->toBe('OLDPART')
+        ->and($resolver->resolve('OLDPART', onlineOnly: false)['item']->item_number)->toBe('OLDPART')
+        ->and($resolver->resolve('HIDDEN123'))->toBeNull()
+        ->and($resolver->resolve('HIDDEN123', onlineOnly: false)['item']->is($hiddenItem))->toBeTrue()
         ->and($resolver->resolve('NLA-123')['item']->is($discontinuedItem))->toBeTrue()
         ->and($resolver->suggest('dw4')->first()?->is($activeItem))->toBeTrue();
 });
@@ -152,10 +201,35 @@ it('maps catalog item pages from the upstream datasource', function (): void {
                 'displayname' => '6 inch ring',
                 'description' => '6" Ring',
                 'isinactive' => 'F',
+                'isonline' => 'T',
+                'custitem6' => 'T',
+                'custitem_nla_boolean' => 'F',
                 'lastmodifieddate' => '2026-07-21T12:34:56',
             ],
             [
                 'id' => '456',
+                'itemid' => 'OFFLINE123',
+                'displayname' => 'Offline part',
+                'description' => 'Not online',
+                'isinactive' => 'F',
+                'isonline' => 'T',
+                'custitem6' => 'F',
+                'custitem_nla_boolean' => 'F',
+                'lastmodifieddate' => '2026-07-21T12:35:56',
+            ],
+            [
+                'id' => '789',
+                'itemid' => 'NLA123',
+                'displayname' => 'NLA part',
+                'description' => 'No longer available',
+                'isinactive' => 'F',
+                'isonline' => 'T',
+                'custitem6' => 'T',
+                'custitem_nla_boolean' => 'T',
+                'lastmodifieddate' => '2026-07-21T12:36:56',
+            ],
+            [
+                'id' => '999',
                 'itemid' => '',
                 'displayname' => 'Skipped',
             ],
@@ -167,10 +241,18 @@ it('maps catalog item pages from the upstream datasource', function (): void {
         ->fetchItemPage(25, 50, Carbon::parse('2026-07-01 10:00:00'));
 
     expect($page['has_more'])->toBeFalse()
-        ->and($page['items'])->toHaveCount(1)
+        ->and($page['items'])->toHaveCount(3)
         ->and($page['items'][0]['netsuite_item_id'])->toBe(123)
         ->and($page['items'][0]['item_number'])->toBe('WB31X5013CM')
-        ->and($page['items'][0]['status'])->toBe(CatalogItem::STATUS_ACTIVE);
+        ->and($page['items'][0]['is_online'])->toBeTrue()
+        ->and($page['items'][0])->not->toHaveKey('status')
+        ->and($page['items'][0])->not->toHaveKey('custitem6')
+        ->and($page['items'][1]['item_number'])->toBe('OFFLINE123')
+        ->and($page['items'][1]['is_online'])->toBeFalse()
+        ->and($page['items'][1])->not->toHaveKey('status')
+        ->and($page['items'][2]['item_number'])->toBe('NLA123')
+        ->and($page['items'][2]['is_discontinued'])->toBeTrue()
+        ->and($page['items'][2])->not->toHaveKey('status');
 
     Http::assertSent(function (Request $request): bool {
         $query = $request->data()['q'] ?? '';
@@ -179,6 +261,9 @@ it('maps catalog item pages from the upstream datasource', function (): void {
             && str_contains($request->url(), 'limit=25')
             && str_contains($request->url(), 'offset=50')
             && str_contains($query, 'FROM item')
+            && str_contains($query, 'isonline')
+            && str_contains($query, 'custitem6')
+            && str_contains($query, 'custitem_nla_boolean')
             && str_contains($query, "lastmodifieddate >= TO_DATE('2026-07-01 10:00:00'")
             && str_contains($query, 'ORDER BY lastmodifieddate ASC, id ASC');
     });

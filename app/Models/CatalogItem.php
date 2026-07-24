@@ -4,9 +4,11 @@ namespace App\Models;
 
 use Database\Factories\CatalogItemFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\SoftDeletes;
 
 #[Fillable([
     'netsuite_item_id',
@@ -14,9 +16,9 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
     'normalized_item_number',
     'display_name',
     'description',
-    'status',
     'is_inactive',
     'is_discontinued',
+    'is_online',
     'multiple',
     'available_quantity',
     'availability_status',
@@ -26,13 +28,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 class CatalogItem extends Model
 {
     /** @use HasFactory<CatalogItemFactory> */
-    use HasFactory;
-
-    public const string STATUS_ACTIVE = 'active';
-
-    public const string STATUS_INACTIVE = 'inactive';
-
-    public const string STATUS_DISCONTINUED = 'discontinued';
+    use HasFactory, SoftDeletes;
 
     /**
      * @return array<string, string>
@@ -43,6 +39,7 @@ class CatalogItem extends Model
             'netsuite_item_id' => 'integer',
             'is_inactive' => 'boolean',
             'is_discontinued' => 'boolean',
+            'is_online' => 'boolean',
             'multiple' => 'integer',
             'available_quantity' => 'integer',
             'last_synced_at' => 'datetime',
@@ -65,10 +62,23 @@ class CatalogItem extends Model
         return $this->hasMany(OrderLine::class);
     }
 
+    /**
+     * @param  Builder<CatalogItem>  $query
+     */
+    public function scopeAvailableOnline(Builder $query): void
+    {
+        $query->where('is_online', true);
+    }
+
+    public function isAvailableOnline(): bool
+    {
+        return $this->is_online;
+    }
+
     public function isAvailableForOrdering(): bool
     {
-        return $this->status === self::STATUS_ACTIVE
-            && ! $this->is_inactive
-            && ! $this->is_discontinued;
+        return ! $this->is_inactive
+            && ! $this->is_discontinued
+            && $this->isAvailableOnline();
     }
 }

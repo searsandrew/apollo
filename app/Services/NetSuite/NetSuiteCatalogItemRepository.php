@@ -27,6 +27,9 @@ class NetSuiteCatalogItemRepository
                 displayname,
                 description,
                 isinactive,
+                isonline,
+                custitem6,
+                custitem_nla_boolean,
                 lastmodifieddate
             FROM item
             WHERE itemid IS NOT NULL
@@ -72,15 +75,18 @@ class NetSuiteCatalogItemRepository
         }
 
         $isInactive = $this->truthyString($item['isinactive'] ?? null);
+        $isOnline = $this->truthyString($item['isonline'] ?? null)
+            && $this->truthyString($item['custitem6'] ?? null);
+        $isDiscontinued = $this->truthyString($item['custitem_nla_boolean'] ?? null);
 
         return [
             'netsuite_item_id' => $this->nullableInt($item['id'] ?? null),
             'item_number' => $itemNumber,
             'display_name' => $this->nullableString($item['displayname'] ?? null),
             'description' => $this->nullableString($item['description'] ?? null),
-            'status' => $isInactive ? 'inactive' : 'active',
             'is_inactive' => $isInactive,
-            'is_discontinued' => false,
+            'is_discontinued' => $isDiscontinued,
+            'is_online' => $isOnline,
             'last_modified_at' => $this->nullableDateTimeString($item['lastmodifieddate'] ?? null),
             'aliases' => [],
             'prices' => [],

@@ -14,10 +14,9 @@ class CatalogItemResolver
     ) {}
 
     /**
-     * @param  array<int, string>|null  $statuses
      * @return array{item: CatalogItem, matched_by: string, requested: string, normalized: string, matched_value: string|null, alias: CatalogItemAlias|null}|null
      */
-    public function resolve(string $partNumber, ?array $statuses = [CatalogItem::STATUS_ACTIVE, CatalogItem::STATUS_DISCONTINUED]): ?array
+    public function resolve(string $partNumber, bool $onlineOnly = true): ?array
     {
         $normalized = $this->normalizer->normalize($partNumber);
 
@@ -25,9 +24,9 @@ class CatalogItemResolver
             return null;
         }
 
-        $directQuery = CatalogItem::query()
+        $directQuery = ($onlineOnly ? CatalogItem::query() : CatalogItem::withTrashed())
             ->where('normalized_item_number', $normalized);
-        $this->constrainStatuses($directQuery, $statuses);
+        $this->constrainOnlineAvailability($directQuery, $onlineOnly);
 
         $item = $directQuery->first();
 
@@ -43,14 +42,14 @@ class CatalogItemResolver
         }
 
         $aliasQuery = CatalogItemAlias::query()
-            ->with('catalogItem')
+            ->with(['catalogItem' => fn ($query) => $onlineOnly ? $query : $query->withTrashed()])
             ->where('normalized_alias', $normalized)
             ->orderByDesc('confidence')
             ->orderBy('id');
 
-        if ($statuses !== null) {
-            $aliasQuery->whereHas('catalogItem', function (Builder $query) use ($statuses): void {
-                $this->constrainStatuses($query, $statuses);
+        if ($onlineOnly) {
+            $aliasQuery->whereHas('catalogItem', function (Builder $query): void {
+                $this->constrainOnlineAvailability($query, true);
             });
         }
 
@@ -71,10 +70,9 @@ class CatalogItemResolver
     }
 
     /**
-     * @param  array<int, string>|null  $statuses
      * @return Collection<int, CatalogItem>
      */
-    public function suggest(string $partNumber, int $limit = 5, ?array $statuses = [CatalogItem::STATUS_ACTIVE, CatalogItem::STATUS_DISCONTINUED]): Collection
+    public function suggest(string $partNumber, int $limit = 5, bool $onlineOnly = true): Collection
     {
         $normalized = $this->normalizer->normalize($partNumber);
 
@@ -82,12 +80,12 @@ class CatalogItemResolver
             return collect();
         }
 
-        $items = CatalogItem::query()
+        $items = ($onlineOnly ? CatalogItem::query() : CatalogItem::withTrashed())
             ->where(function (Builder $query) use ($normalized): void {
                 $query->where('normalized_item_number', 'like', $normalized.'%')
                     ->orWhere('normalized_item_number', 'like', '%'.$normalized.'%');
             });
-        $this->constrainStatuses($items, $statuses);
+        $this->constrainOnlineAvailability($items, $onlineOnly);
 
         $matches = $items
             ->orderByRaw('CASE WHEN normalized_item_number LIKE ? THEN 0 ELSE 1 END', [$normalized.'%'])
@@ -101,15 +99,15 @@ class CatalogItemResolver
 
         $seen = $matches->pluck('id')->all();
         $aliases = CatalogItemAlias::query()
-            ->with('catalogItem')
+            ->with(['catalogItem' => fn ($query) => $onlineOnly ? $query : $query->withTrashed()])
             ->where(function (Builder $query) use ($normalized): void {
                 $query->where('normalized_alias', 'like', $normalized.'%')
                     ->orWhere('normalized_alias', 'like', '%'.$normalized.'%');
             })
             ->when($seen !== [], fn (Builder $query) => $query->whereNotIn('catalog_item_id', $seen))
-            ->when($statuses !== null, function (Builder $query) use ($statuses): void {
-                $query->whereHas('catalogItem', function (Builder $query) use ($statuses): void {
-                    $this->constrainStatuses($query, $statuses);
+            ->when($onlineOnly, function (Builder $query): void {
+                $query->whereHas('catalogItem', function (Builder $query): void {
+                    $this->constrainOnlineAvailability($query, true);
                 });
             })
             ->orderByDesc('confidence')
@@ -128,14 +126,13 @@ class CatalogItemResolver
 
     /**
      * @param  Builder<CatalogItem>  $query
-     * @param  array<int, string>|null  $statuses
      */
-    private function constrainStatuses(Builder $query, ?array $statuses): void
+    private function constrainOnlineAvailability(Builder $query, bool $onlineOnly): void
     {
-        if ($statuses === null) {
+        if (! $onlineOnly) {
             return;
         }
 
-        $query->whereIn('status', $statuses);
+        $query->availableOnline();
     }
 }
